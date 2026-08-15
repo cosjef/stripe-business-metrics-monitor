@@ -135,8 +135,8 @@ Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the th
 
 ## Testing status
 
-`cd firmware/test && make` — **666 checks across six suites, all passing.**
-(`make quick` runs the five logic suites without building LVGL.)
+`cd firmware/test && make` — **699 checks across seven suites, all passing.**
+(`make quick` runs the six logic suites without building LVGL.)
 
 | Suite | Covers |
 |---|---|
@@ -220,12 +220,20 @@ The reason is structural: this board's I2C bus intermittently returns corrupt re
 
 Goal: self-contained subsystem, testable independent of Stripe connectivity.
 
-- [ ] AP mode boot, broadcast `Setup-XXXX` SSID (§9.1 step 1)
-- [ ] Captive portal for WiFi credential entry
-- [ ] Store WiFi credentials in NVS
-- [ ] Capture Stripe restricted-key input via the portal
-- [ ] Capture preferences: timezone, currency, rotation contents, brightness schedule (§9.1 step 5)
-- [ ] Render State C screen (Setup) with live SSID and firmware version in footer
+- [x] AP mode boot, broadcast `Setup-XXXX` SSID (§9.1 step 1) — verified as `Setup-C561`
+- [x] Captive portal for WiFi credential entry — **auto-opens on iOS** via the DNS responder; no IP typing needed
+- [x] Store WiFi credentials in NVS
+- [x] Render State C screen (Setup) with live SSID and firmware version in footer
+- [x] **Full flow verified on hardware 2026-08-15**: portal auto-opened → credentials entered → validated → stored → restart → joined network → DHCP lease `192.168.68.67` → rotation resumed
+- [ ] Capture Stripe restricted-key input via the portal — **moved to Stage 4**, where the key can be validated the moment it is entered (§9.1 step 4) rather than stored untested
+- [ ] Capture preferences: timezone, currency, rotation contents, brightness schedule (§9.1 step 5) — deferred with the key
+
+### Notes from bring-up
+
+- **WiFi authmode threshold is `OPEN`, deliberately.** The stack upgrades itself when a password is present (`authmode threshold changes from OPEN to WPA2` in the log), so open networks are still joinable while protected ones stay secure. Pinning WPA2 would reject legitimate open and guest networks.
+- **The first association attempt often fails** and succeeds on retry — observed as `disconnected, retry 1/5` immediately before a successful join. The bounded retry (5 attempts, then State-B-style failure rather than silent looping) is load-bearing, not defensive padding.
+- **NVS is unencrypted.** Deliberate per §9.1: the device holds a read-only restricted key, so a stolen device leaks a subscriber count, not the ability to move money. NVS encryption needs flash encryption with an eFuse-burned key — irreversible, and it complicates development flashing. Revisit before selling hardware.
+- **The setup page never passes through `printf`.** Its inline CSS contains `%` characters that were read as format specifiers; the page is now sent in chunks. The compiler caught this, not testing.
 
 ## Stage 4: HTTPS client + Stripe auth validation
 

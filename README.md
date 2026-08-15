@@ -8,10 +8,15 @@ Not affiliated with Stripe.
 
 ## Status
 
-Stages 1-2 of 8 complete: display bring-up and the full screen deck. All nine
-screens (six rotating metrics, three device states) render from fixture data,
-rotating every 8 seconds on hardware, with tap-to-advance navigation via the
-onboard IMU to skip ahead. No networking yet.
+Stages 1-3 of 8 complete: display bring-up, the full screen deck, and WiFi
+provisioning. All nine screens (six rotating metrics, three device states)
+render from fixture data, rotating every 8 seconds on hardware, with
+tap-to-advance navigation via the onboard IMU.
+
+On first boot the device opens a `Setup-XXXX` access point with a captive
+portal that auto-opens on a phone; once provisioned it stores credentials in
+NVS and joins the network. Metric values are still fixtures — live Stripe data
+comes in Stages 4-6.
 
 Tap navigation ships with a known trade-off: it reliably detects taps but
 occasionally advances on its own (roughly once per 20s idle). See the build
@@ -51,9 +56,10 @@ cd firmware/test
 make
 ```
 
-666 checks across six suites. Five cover pure logic (text measurement, hero
+699 checks across seven suites. Six cover pure logic (text measurement, hero
 auto-sizing, baseline positioning, font coverage, palette constraints, tap
-detection, and IMU register decoding); the sixth boots real LVGL against an
+detection, IMU register decoding, and WiFi credential validation); the seventh
+boots real LVGL against an
 offscreen framebuffer and asserts on actual pixels — background color, ink
 position, rotation dot state, and color discipline for all nine screens.
 
