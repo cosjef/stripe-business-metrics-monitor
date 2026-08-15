@@ -134,7 +134,7 @@ static void tap_task(void *arg)
             }
 
             if (tap_detector_feed(&det, mg, now) && s_on_tap) {
-                ESP_LOGI(TAG, "double tap (%ld mg)", (long)mg);
+                ESP_LOGI(TAG, "tap (%ld mg)", (long)mg);
                 s_on_tap();
             }
         } else {
@@ -160,6 +160,6 @@ esp_err_t imu_start_tap_watch(void (*on_tap)(void))
     const BaseType_t ok = xTaskCreate(tap_task, "tap", 3072, NULL, 4, NULL);
     ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "tap task failed");
 
-    ESP_LOGI(TAG, "watching for double taps (threshold %d mg)", TAP_THRESHOLD_MG);
+    ESP_LOGI(TAG, "watching for taps (threshold %d mg)", TAP_THRESHOLD_MG);
     return ESP_OK;
 }

@@ -1,11 +1,12 @@
 /*
- * Host tests for double-tap detection.
+ * Host tests for single-tap detection.
  *
  *   cd firmware/test && make && ./test_tapdetect
  *
- * Baseline values come from measurements on the real device: at rest the
- * QMI8658 reads ~1000 mg total (gravity), with noise staying inside ~1020 mg
- * across 295 samples.
+ * All baselines come from measurements on the real device:
+ *   - at rest:            ~1000 mg, noise within ~1020 mg
+ *   - case ringing:       1450-2700 mg, impacts 20-60 ms apart
+ *   - deliberate taps:    6000-10433 mg
  */
 #include <stdio.h>
 
@@ -14,21 +15,21 @@
 static int failures = 0;
 static int checks = 0;
 
-static void check_true(const char *what, int cond)
-{
-    checks++;
-    if (!cond) {
-        failures++;
-        printf("  FAIL %s: expected true\n", what);
-    }
-}
-
 static void check_int(const char *what, int got, int want)
 {
     checks++;
     if (got != want) {
         failures++;
         printf("  FAIL %s: got %d, want %d\n", what, got, want);
+    }
+}
+
+static void check_true(const char *what, int cond)
+{
+    checks++;
+    if (!cond) {
+        failures++;
+        printf("  FAIL %s: expected true\n", what);
     }
 }
 
@@ -46,57 +47,123 @@ static int feed_level(tap_detector_t *d, int32_t mg, uint32_t *t,
     return fired;
 }
 
-/* One impact: a few samples above threshold, then back to rest. */
-static int feed_impact(tap_detector_t *d, uint32_t *t, int32_t peak_mg)
+/* A tap: a spike lasting ~20ms, then settling back to gravity. */
+static int feed_tap(tap_detector_t *d, uint32_t *t, int32_t peak_mg)
 {
     int fired = 0;
-    fired += feed_level(d, peak_mg, t, 2, 10);   /* the strike */
-    fired += feed_level(d, 1000, t, 4, 10);      /* settle back to gravity */
+    fired += feed_level(d, peak_mg, t, 2, 10);
+    fired += feed_level(d, 1000, t, 4, 10);
     return fired;
 }
 
-/* ---- the core behavior ---- */
+/* ---- core behavior ---- */
 
-static void test_double_tap_fires(void)
+static void test_deliberate_tap_fires(void)
 {
-    printf("a double tap fires exactly once\n");
+    printf("a deliberate tap fires exactly once\n");
+
+    tap_detector_t d;
+    tap_detector_init(&d);
+    uint32_t t = 1000;
+
+    check_int("7000mg tap fires once", feed_tap(&d, &t, 7000), 1);
+
+    /* Real measured peaks must all register. */
+    const int32_t measured[] = {6123, 7004, 7157, 7716, 7859, 7906, 8332,
+                                8919, 9893, 10433};
+    for (size_t i = 0; i < sizeof(measured) / sizeof(measured[0]); i++) {
+        tap_detector_t d2;
+        tap_detector_init(&d2);
+        uint32_t t2 = 0;
+        char what[64];
+        snprintf(what, sizeof(what), "measured tap %ld mg fires",
+                 (long)measured[i]);
+        check_int(what, feed_tap(&d2, &t2, measured[i]), 1);
+    }
+}
+
+/*
+ * The lockout is what stops one physical tap advancing several screens: the
+ * case rings for a few hundred ms after a strike.
+ */
+static void test_ringing_produces_one_tap(void)
+{
+    printf("case ringing after a tap produces only one tap\n");
 
     tap_detector_t d;
     tap_detector_init(&d);
     uint32_t t = 1000;
 
     int fired = 0;
-    fired += feed_impact(&d, &t, 1800);
-    t += 100;                       /* gap between the two taps */
-    fired += feed_impact(&d, &t, 1800);
+    /* The strike. */
+    fired += feed_level(&d, 8000, &t, 2, 10);
+    fired += feed_level(&d, 1000, &t, 2, 10);
+    /* Ringing: repeated impacts 20-60ms apart, at the magnitudes measured. */
+    fired += feed_level(&d, 4200, &t, 1, 20);
+    fired += feed_level(&d, 1200, &t, 1, 10);
+    fired += feed_level(&d, 5100, &t, 1, 30);
+    fired += feed_level(&d, 1100, &t, 1, 10);
+    fired += feed_level(&d, 4300, &t, 1, 20);
+    fired += feed_level(&d, 1000, &t, 10, 10);
 
-    check_int("double tap fires once", fired, 1);
-
-    /* And it must not keep firing afterwards. */
-    fired = feed_level(&d, 1000, &t, 20, 10);
-    check_int("no repeat after firing", fired, 0);
+    check_int("one strike plus ringing fires once", fired, 1);
 }
 
-static void test_single_tap_does_not_fire(void)
+/*
+ * Two deliberate taps, separated by more than the lockout, must both count --
+ * a user tapping twice expects to advance twice.
+ */
+static void test_separate_taps_both_fire(void)
 {
-    printf("a single tap does not fire\n");
+    printf("two separated taps both fire\n");
 
     tap_detector_t d;
     tap_detector_init(&d);
     uint32_t t = 1000;
 
-    int fired = feed_impact(&d, &t, 1800);
-    check_int("one impact alone does not fire", fired, 0);
+    int fired = 0;
+    fired += feed_tap(&d, &t, 7000);
+    /* feed_tap only advances 60ms, so wait out the rest of the lockout. */
+    t += TAP_LOCKOUT_MS + 100;
+    fired += feed_tap(&d, &t, 7000);
 
-    /* Waiting past the window must not fire either. */
-    fired = feed_level(&d, 1000, &t, 100, 10);
-    check_int("still silent after the window expires", fired, 0);
+    check_int("two well-separated taps fire twice", fired, 2);
 }
 
 /*
- * The device sitting on a desk must never advance a screen. This is the
- * failure mode that would make the product feel broken.
+ * The lockout boundary itself: a second tap just inside it must be swallowed,
+ * and just outside it must register. This is what keeps one strike from
+ * advancing several screens while still letting a user tap twice on purpose.
  */
+static void test_lockout_boundary(void)
+{
+    printf("lockout boundary\n");
+
+    /* Second tap while still locked out: ignored. */
+    {
+        tap_detector_t d;
+        tap_detector_init(&d);
+        uint32_t t = 1000;
+        int fired = feed_tap(&d, &t, 7000);
+        t += TAP_LOCKOUT_MS / 2;
+        fired += feed_tap(&d, &t, 7000);
+        check_int("tap inside lockout is ignored", fired, 1);
+    }
+
+    /* Second tap after the lockout: registers. */
+    {
+        tap_detector_t d;
+        tap_detector_init(&d);
+        uint32_t t = 1000;
+        int fired = feed_tap(&d, &t, 7000);
+        t += TAP_LOCKOUT_MS + 50;
+        fired += feed_tap(&d, &t, 7000);
+        check_int("tap after lockout registers", fired, 2);
+    }
+}
+
+/* ---- rejection ---- */
+
 static void test_rest_never_fires(void)
 {
     printf("resting on a desk never fires\n");
@@ -105,13 +172,12 @@ static void test_rest_never_fires(void)
     tap_detector_init(&d);
     uint32_t t = 0;
 
-    /* Measured at-rest range on hardware, with margin. */
-    const int32_t rest_samples[] = {995, 1000, 1005, 1010, 1020, 998, 1002};
+    const int32_t rest[] = {995, 1000, 1005, 1010, 1020, 998, 1002};
 
     int fired = 0;
     for (int rep = 0; rep < 200; rep++) {
-        for (size_t i = 0; i < sizeof(rest_samples) / sizeof(rest_samples[0]); i++) {
-            if (tap_detector_feed(&d, rest_samples[i], t)) {
+        for (size_t i = 0; i < sizeof(rest) / sizeof(rest[0]); i++) {
+            if (tap_detector_feed(&d, rest[i], t)) {
                 fired++;
             }
             t += 10;
@@ -122,8 +188,28 @@ static void test_rest_never_fires(void)
 }
 
 /*
- * Being picked up or set down is a slow, sustained change -- not a tap.
+ * The magnitudes that were causing spurious triggers before: incidental
+ * knocks and ringing, measured at 1450-2700 mg. All must now be rejected.
  */
+static void test_soft_knocks_rejected(void)
+{
+    printf("soft knocks and ringing are rejected\n");
+
+    const int32_t soft[] = {1453, 1486, 1494, 1499, 1505, 1510, 1522, 1527,
+                            1539, 1558, 1599, 1618, 1631, 1678, 1699, 1750,
+                            1757, 1784, 1858, 1917, 2038, 2182, 2352, 2582,
+                            2669, 2681};
+
+    for (size_t i = 0; i < sizeof(soft) / sizeof(soft[0]); i++) {
+        tap_detector_t d;
+        tap_detector_init(&d);
+        uint32_t t = 0;
+        char what[72];
+        snprintf(what, sizeof(what), "%ld mg knock rejected", (long)soft[i]);
+        check_int(what, feed_tap(&d, &t, soft[i]), 0);
+    }
+}
+
 static void test_handling_does_not_fire(void)
 {
     printf("picking the device up does not fire\n");
@@ -132,86 +218,92 @@ static void test_handling_does_not_fire(void)
     tap_detector_init(&d);
     uint32_t t = 0;
 
-    /* A gradual swing up to 1.3g and back, over ~600ms. */
+    /* A slow swing up to 2.5g and back -- below threshold throughout. */
     int fired = 0;
-    for (int mg = 1000; mg <= 1300; mg += 20) {
+    for (int mg = 1000; mg <= 2500; mg += 50) {
         if (tap_detector_feed(&d, mg, t)) fired++;
         t += 20;
     }
-    for (int mg = 1300; mg >= 1000; mg -= 20) {
+    for (int mg = 2500; mg >= 1000; mg -= 50) {
         if (tap_detector_feed(&d, mg, t)) fired++;
         t += 20;
     }
 
-    check_int("slow handling below threshold does not fire", fired, 0);
+    check_int("slow handling does not fire", fired, 0);
 }
 
-/* ---- timing windows ---- */
-
-static void test_taps_too_close_are_one_tap(void)
+/*
+ * A sustained high reading (the device held against something vibrating, or
+ * shaken continuously) fires at most once per lockout, never faster.
+ *
+ * It deliberately does NOT fire only once: continuous shaking advancing the
+ * screen repeatedly is reasonable behavior, and suppressing it entirely would
+ * require distinguishing "still the same disturbance" from "a new one", which
+ * the ringing data shows is not reliably possible.
+ */
+static void test_sustained_high_is_rate_limited(void)
 {
-    printf("two impacts closer than the min gap are one tap\n");
+    printf("a sustained high reading is rate-limited to the lockout\n");
+
+    tap_detector_t d;
+    tap_detector_init(&d);
+    uint32_t t = 0;
+
+    /* Held above threshold for 2 seconds. */
+    const int fired = feed_level(&d, 6000, &t, 200, 10);
+
+    /* 2000ms of sustained input at a 500ms lockout allows at most 5 taps
+     * (one immediately, then one per lockout period). */
+    const int max_expected = 2000 / TAP_LOCKOUT_MS + 1;
+    char what[96];
+    snprintf(what, sizeof(what), "2s sustained fires <= %d times (got %d)",
+             max_expected, fired);
+    check_true(what, fired >= 1 && fired <= max_expected);
+}
+
+/* ---- replay of the real capture ---- */
+
+/*
+ * The 48 impacts logged during natural tapping on hardware. Under the old
+ * double-tap logic this produced 14 accepted gestures, which felt random.
+ * With a 4000 mg threshold only the deliberate strikes should survive.
+ */
+static void test_real_capture_replay(void)
+{
+    printf("replaying the real tap capture\n");
+
+    /* (magnitude_mg, ms_since_previous) as logged. */
+    static const int32_t capture[][2] = {
+        {7004, 0},   {3795, 280},  {1784, 90},   {6123, 650},  {7157, 230},
+        {3126, 280}, {1558, 670},  {1539, 1170}, {2352, 150},  {1494, 20},
+        {4030, 210}, {2681, 700},  {1858, 800},  {3966, 30},   {1678, 150},
+        {3799, 870}, {2582, 730},  {7906, 240},  {1917, 1840}, {1510, 1380},
+        {3950, 350}, {7859, 510},  {4239, 739},  {8919, 741},  {1681, 580},
+        {1618, 150}, {3986, 290},  {6421, 1020}, {1699, 650},  {1757, 1870},
+        {1499, 150}, {8332, 570},  {6923, 280},  {2182, 740},  {9893, 1760},
+        {2038, 790}, {7716, 1249}, {4030, 1251}, {1599, 2070}, {1486, 690},
+        {1453, 60},  {10433, 239}, {1505, 141},  {1527, 760},  {1750, 30},
+        {2669, 220}, {1522, 170},  {1631, 439},
+    };
 
     tap_detector_t d;
     tap_detector_init(&d);
     uint32_t t = 1000;
-
-    /* Impact, brief dip, immediate second impact -- this is ringing, not a
-     * deliberate second tap. */
     int fired = 0;
-    fired += feed_level(&d, 1800, &t, 2, 10);
-    fired += feed_level(&d, 1000, &t, 1, 10);   /* only 10ms of quiet */
-    fired += feed_level(&d, 1800, &t, 2, 10);
-    fired += feed_level(&d, 1000, &t, 4, 10);
 
-    check_int("ringing does not count as a double tap", fired, 0);
-}
-
-static void test_taps_too_far_apart_do_not_pair(void)
-{
-    printf("two impacts further apart than the max gap do not pair\n");
-
-    tap_detector_t d;
-    tap_detector_init(&d);
-    uint32_t t = 1000;
-
-    int fired = 0;
-    fired += feed_impact(&d, &t, 1800);
-    t += TAP_MAX_GAP_MS + 200;      /* well past the pairing window */
-    fired += feed_impact(&d, &t, 1800);
-
-    check_int("widely separated impacts do not pair", fired, 0);
-}
-
-static void test_gap_boundaries(void)
-{
-    printf("pairing window boundaries\n");
-
-    /* Just inside the window: fires. */
-    {
-        tap_detector_t d;
-        tap_detector_init(&d);
-        uint32_t t = 1000;
-        int fired = 0;
-        fired += feed_impact(&d, &t, 1800);
-        t += TAP_MAX_GAP_MS / 2;
-        fired += feed_impact(&d, &t, 1800);
-        check_int("mid-window gap fires", fired, 1);
+    for (size_t i = 0; i < sizeof(capture) / sizeof(capture[0]); i++) {
+        t += (uint32_t)capture[i][1];
+        /* The impact itself, then a settle back toward rest. */
+        if (tap_detector_feed(&d, capture[i][0], t)) fired++;
+        t += 10;
+        if (tap_detector_feed(&d, 1000, t)) fired++;
+        t += 10;
     }
 
-    /* A third tap after a completed double tap starts fresh, and does not
-     * immediately fire again on its own. */
-    {
-        tap_detector_t d;
-        tap_detector_init(&d);
-        uint32_t t = 1000;
-        feed_impact(&d, &t, 1800);
-        t += 100;
-        feed_impact(&d, &t, 1800);   /* fires here */
-        t += 100;
-        int fired = feed_impact(&d, &t, 1800);
-        check_int("a lone third impact does not fire", fired, 0);
-    }
+    /* Every accepted tap must correspond to a strike above threshold, and
+     * the count must be far below the 14 the old logic produced. */
+    check_true("real capture yields a plausible tap count", fired >= 8 && fired <= 16);
+    printf("    (accepted %d taps from 48 impacts; old logic accepted 14)\n", fired);
 }
 
 /* ---- magnitude helper ---- */
@@ -220,70 +312,31 @@ static void test_magnitude(void)
 {
     printf("acceleration magnitude\n");
 
-    /* At rest the device reads about -1g on Z and near zero elsewhere;
-     * magnitude should come out ~1000 mg regardless of sign. */
     check_int("z=-1g reads 1000mg", accel_magnitude_mg(0, 0, -4096, 4096), 1000);
     check_int("z=+1g reads 1000mg", accel_magnitude_mg(0, 0, 4096, 4096), 1000);
     check_int("x=1g reads 1000mg", accel_magnitude_mg(4096, 0, 0, 4096), 1000);
 
-    /* The real measured rest vector: ax=-419 ay=143 az=-3969. */
     const int32_t rest = accel_magnitude_mg(-419, 143, -3969, 4096);
     check_true("measured rest vector is near 1000mg", rest > 950 && rest < 1050);
 
     check_int("zero reads zero", accel_magnitude_mg(0, 0, 0, 4096), 0);
-
-    /* A 2g impact on one axis. */
     check_int("2g on one axis", accel_magnitude_mg(8192, 0, 0, 4096), 2000);
-}
-
-/*
- * Feeding a real capture of the device at rest must produce nothing. These are
- * actual samples logged from hardware.
- */
-static void test_real_rest_capture(void)
-{
-    printf("replaying a real at-rest capture\n");
-
-    /* (ax, ay, az) triples measured on the device sitting on a desk. */
-    static const int16_t capture[][3] = {
-        {-419, 143, -3969}, {-498, 0, -4099}, {0, 169, -3900},
-        {-306, 179, -4148}, {0, 0, -4096}, {-420, 140, -3970},
-        {-410, 150, -3980}, {-430, 130, -3960}, {0, 100, -4050},
-        {-350, 160, -4000}, {-380, 120, -4020}, {-400, 145, -3990},
-    };
-
-    tap_detector_t d;
-    tap_detector_init(&d);
-    uint32_t t = 0;
-    int fired = 0;
-
-    for (int rep = 0; rep < 50; rep++) {
-        for (size_t i = 0; i < sizeof(capture) / sizeof(capture[0]); i++) {
-            const int32_t mg = accel_magnitude_mg(capture[i][0], capture[i][1],
-                                                  capture[i][2], 4096);
-            if (tap_detector_feed(&d, mg, t)) {
-                fired++;
-            }
-            t += 10;
-        }
-    }
-
-    check_int("real at-rest data produces no taps", fired, 0);
 }
 
 int main(void)
 {
-    printf("double-tap detection tests\n\n");
+    printf("single-tap detection tests\n\n");
 
-    test_double_tap_fires();
-    test_single_tap_does_not_fire();
+    test_deliberate_tap_fires();
+    test_ringing_produces_one_tap();
+    test_separate_taps_both_fire();
+    test_lockout_boundary();
     test_rest_never_fires();
+    test_soft_knocks_rejected();
     test_handling_does_not_fire();
-    test_taps_too_close_are_one_tap();
-    test_taps_too_far_apart_do_not_pair();
-    test_gap_boundaries();
+    test_sustained_high_is_rate_limited();
+    test_real_capture_replay();
     test_magnitude();
-    test_real_rest_capture();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

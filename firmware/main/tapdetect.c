@@ -1,5 +1,5 @@
 /*
- * Double-tap detection. See tapdetect.h for the rationale.
+ * Single-tap detection. See tapdetect.h for why it is single and not double.
  *
  * No ESP-IDF or I2C dependencies, so this builds and tests on the host.
  */
@@ -9,15 +9,29 @@
 
 void tap_detector_init(tap_detector_t *d)
 {
-    d->last_impact_ms = 0;
+    d->lockout_until_ms = 0;
     d->armed = 0;
 }
 
 _Bool tap_detector_feed(tap_detector_t *d, int32_t magnitude_mg, uint32_t now_ms)
 {
-    /* Wait for acceleration to fall back to near-rest before another impact
-     * can register. Without this, one physical tap rings out across several
-     * samples and reads as a burst of impacts. */
+    /* Inside the lockout after an accepted tap: ignore everything. This is
+     * what absorbs the case ringing out, which otherwise reads as a burst of
+     * further taps and advances several screens from one strike. */
+    if (d->lockout_until_ms != 0) {
+        if (now_ms < d->lockout_until_ms) {
+            return 0;
+        }
+        d->lockout_until_ms = 0;
+        /* Also clear the release latch. The lockout has already outlasted the
+         * ringing it exists to absorb, so requiring a separate low reading
+         * before the next tap would leave the detector armed forever if the
+         * next sample happens to arrive high. */
+        d->armed = 0;
+    }
+
+    /* Wait for the reading to fall back before allowing another tap, so a
+     * sustained high magnitude cannot latch on and fire repeatedly. */
     if (d->armed) {
         if (magnitude_mg < TAP_RELEASE_MG) {
             d->armed = 0;
@@ -29,33 +43,8 @@ _Bool tap_detector_feed(tap_detector_t *d, int32_t magnitude_mg, uint32_t now_ms
         return 0;
     }
 
-    /* An impact. */
     d->armed = 1;
-
-    const uint32_t prev = d->last_impact_ms;
-    d->last_impact_ms = now_ms;
-
-    if (prev == 0) {
-        /* First impact; wait to see whether a second follows. */
-        return 0;
-    }
-
-    const uint32_t gap = now_ms - prev;
-
-    if (gap < TAP_MIN_GAP_MS) {
-        /* Too soon to be a deliberate second tap -- treat it as the same tap
-         * still ringing, and keep waiting for a real second one. */
-        return 0;
-    }
-
-    if (gap > TAP_MAX_GAP_MS) {
-        /* Too late to pair. This impact becomes the new first tap. */
-        return 0;
-    }
-
-    /* A genuine double tap. Reset so the next tap starts a fresh pair rather
-     * than chaining off this one. */
-    d->last_impact_ms = 0;
+    d->lockout_until_ms = now_ms + TAP_LOCKOUT_MS;
     return 1;
 }
 
