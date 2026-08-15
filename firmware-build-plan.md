@@ -12,7 +12,7 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 | Framework | ESP-IDF (not Arduino) | User choice. More setup than Arduino but no HAL abstraction tax. |
 | Graphics | `esp_lcd` (`esp_lcd_panel_st7789`) + `esp_lvgl_port` + LVGL 9 | This is what Waveshare's own ESP-IDF example for this exact board uses. Confirmed 2026-08-15 via Waveshare's repo (`examples/ESP32-S3-LCD-1.54-demo/ESP-IDF-5.5.1/05_lvgl_example`). Rejected LovyanGFX for IDF — technically possible but thinly documented outside Arduino, not what Waveshare ships. |
 | Starting point | Waveshare `ESP32-S3-Touch-LCD-1.54` GitHub repo, `05_lvgl_example` | Drop the `esp_lcd_touch_cst816s` dependency. **Confirmed by I2C scan** that no touch controller exists on this board — see "Input: no touch controller" below. |
-| Input | **Single hard tap**, detected via the onboard QMI8658 IMU at I2C `0x6B` | No touch hardware. Departs from spec §1 principle 3 ("no interaction"); see below. |
+| Input | **Single hard tap**, detected HOST-SIDE from raw accelerometer magnitude (QMI8658 at I2C `0x6B`) | No touch hardware. Departs from spec §1 principle 3 ("no interaction"). The chip's own tap engine never fires on this part; ships with a documented false-trigger trade-off. See below. |
 | Fonts | **Roboto Condensed Bold (SIL OFL)**, generated to LVGL bitmap fonts at 12 sizes (18/20/22 UI + 24/32/40/52/60/64/76/88/96 hero) via `tools/gen_fonts.sh` | See "Typeface deviation from spec §5.4" below. LVGL's stock Montserrat was rejected (caps at 48px vs the spec's 96px hero max); SF Compact was rejected as non-redistributable. |
 | HTTPS/TLS client | **Not yet decided** | Open gap — see below. |
 | JSON parsing | **Not yet decided** | Open gap — see below. |
