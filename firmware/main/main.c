@@ -17,6 +17,7 @@
 #include "board_config.h"
 #include "layout.h"
 #include "hero_size.h"
+#include "baseline.h"
 #include "fonts.h"
 #include "colortest.h"
 
@@ -59,12 +60,10 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text,
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
 
-    const int ascent = lv_font_get_line_height(font) - font->base_line;
-    int top = baseline_y - ascent;
-    if (top < 0) {
-        top = 0;
-    }
-    lv_obj_set_pos(label, x, top);
+    lv_obj_set_pos(label, x,
+                   baseline_to_top(baseline_y,
+                                   (int)lv_font_get_line_height(font),
+                                   (int)font->base_line));
 
     return label;
 }
@@ -111,7 +110,8 @@ static void draw_skeleton(void)
      * baseline (5.1), so offset by the ascent to land it correctly. */
     const lv_font_t *label_font = font_for_size(SIZE_LABEL);
     make_label(scr, FIXTURE_LABEL, label_font, COLOR_MUTED, PAD_PX,
-               LABEL_BASELINE_Y + lv_font_get_line_height(label_font) - label_font->base_line);
+               LABEL_BASELINE_Y + font_ascent((int)lv_font_get_line_height(label_font),
+                                              (int)label_font->base_line));
 
     /* Hero size is computed from the value, never hardcoded (spec 2.4). */
     const int hero_px = hero_size_for_text(FIXTURE_HERO);
