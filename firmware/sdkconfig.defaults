@@ -30,3 +30,12 @@ CONFIG_LV_THEME_DEFAULT_DARK=y
 # LV_FONT_DEFAULT must point at a font that is actually compiled in.
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_DEFAULT_MONTSERRAT_14=y
+
+# TLS: use Espressif's bundled Mozilla CA roots rather than pinning Stripe's
+# current root. Pinning is smaller, but a root rotation would brick devices in
+# the field until firmware is updated (spec 8.2 flags CA upkeep as a real cost).
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
+
+# esp_http_client needs a larger stack for the TLS handshake.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

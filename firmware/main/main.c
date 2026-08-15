@@ -30,6 +30,8 @@
 #include "settings.h"
 #include "wifi.h"
 #include "portal.h"
+#include "stripe_key.h"
+#include "stripe_api.h"
 #include "colortest.h"
 
 #include "esp_log.h"
@@ -133,6 +135,7 @@ static void on_double_tap(void)
 
 /* Setup mode: show State C and run the portal until credentials arrive. */
 static char s_setup_ssid[SETUP_SSID_LEN];
+static volatile bool s_restart_pending = false;
 
 static void show_setup_screen(void)
 {
@@ -141,6 +144,45 @@ static void show_setup_screen(void)
                       "then open browser", FIRMWARE_VERSION);
     lvgl_port_unlock();
     ESP_LOGI(TAG, "setup mode: join \"%s\"", s_setup_ssid);
+}
+
+/*
+ * Validate a Stripe key against the live API (spec 9.1 step 4).
+ *
+ * Runs only once WiFi is up, so the key is proven before it is stored rather
+ * than failing minutes later on the device with no explanation.
+ */
+static bool on_stripe_key(const char *key, char *out_msg, size_t msg_len)
+{
+    stripe_set_key(key);
+    const stripe_validation_t v = stripe_validate_key();
+
+    if (v.result != STRIPE_OK) {
+        snprintf(out_msg, msg_len, "%s (HTTP %d)",
+                 stripe_result_str(v.result), v.http_status);
+        ESP_LOGW(TAG, "key validation failed: %s", out_msg);
+        return false;
+    }
+
+    if (settings_set_stripe_key(key) != ESP_OK) {
+        snprintf(out_msg, msg_len, "Could not save the key to the device");
+        return false;
+    }
+
+    /* Show the customer their own account state -- the spec's "converts
+     * skeptics" moment. Deliberately not a number yet: MRR needs the
+     * computation engine from Stage 5. */
+    snprintf(out_msg, msg_len,
+             "Key verified%s. %s",
+             v.test_mode ? " (test mode)" : "",
+             v.has_subscriptions ? "Found active subscriptions."
+                                 : "No active subscriptions yet.");
+
+    ESP_LOGI(TAG, "key validated and stored");
+
+    /* Restart into normal mode once the customer has seen the confirmation. */
+    s_restart_pending = true;
+    return true;
 }
 
 static void on_credentials(const char *ssid, const char *pass)
@@ -164,8 +206,51 @@ static void run_setup_mode(void)
 {
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(wifi_start_ap(s_setup_ssid, sizeof(s_setup_ssid)));
-    ESP_ERROR_CHECK(portal_start(on_credentials));
+    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key));
     show_setup_screen();
+}
+
+/*
+ * Second setup phase: WiFi is configured but no Stripe key is stored yet.
+ *
+ * The device joins the customer's network AND runs the AP simultaneously, so
+ * the key can be validated against the live API the moment it is entered
+ * (spec 9.1 step 4). Validating before storing is the whole point -- a key
+ * that fails should be corrected in the form, not discovered minutes later on
+ * the device.
+ */
+static void run_key_setup_mode(void)
+{
+    char ssid[WIFI_SSID_MAX_LEN + 1] = "";
+    char pass[WIFI_PASS_MAX_LEN + 1] = "";
+
+    if (settings_get_wifi(ssid, sizeof(ssid), pass, sizeof(pass)) != ESP_OK) {
+        run_setup_mode();
+        return;
+    }
+
+    ESP_ERROR_CHECK(wifi_init());
+    ESP_ERROR_CHECK(wifi_start_apsta(s_setup_ssid, sizeof(s_setup_ssid),
+                                     ssid, pass));
+    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key));
+
+    lvgl_port_lock(0);
+    screen_draw_setup(lv_screen_active(), "Add Stripe key", s_setup_ssid,
+                      "then open browser", FIRMWARE_VERSION);
+    lvgl_port_unlock();
+
+    ESP_LOGI(TAG, "key setup: join \"%s\", go to http://192.168.4.1/key",
+             s_setup_ssid);
+
+    /* Wait for the key to be accepted, then restart into normal mode. The
+     * delay lets the customer read the confirmation before the AP drops. */
+    while (!s_restart_pending) {
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+
+    ESP_LOGI(TAG, "setup complete, restarting");
+    vTaskDelay(pdMS_TO_TICKS(3000));
+    esp_restart();
 }
 
 static void run_normal_mode(void)
@@ -217,9 +302,15 @@ void app_main(void)
     return;
 #endif
 
-    /* Setup mode until the customer has provisioned WiFi (spec 9.1). */
+    /* Setup runs in two phases (spec 9.1): WiFi first, then the Stripe key,
+     * which can only be validated once there is a network to validate over. */
     if (!settings_have_wifi()) {
         run_setup_mode();
+        return;
+    }
+
+    if (!settings_have_stripe_key()) {
+        run_key_setup_mode();
         return;
     }
 

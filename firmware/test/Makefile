@@ -32,7 +32,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) $(SCREEN_BIN)
 
@@ -80,3 +80,6 @@ test_tapstatus: test_tapstatus.c ../main/tapstatus.c ../main/tapstatus.h
 
 test_provision: test_provision.c ../main/provision.c ../main/provision.h
 	$(CC) $(CFLAGS) -o $@ test_provision.c ../main/provision.c
+
+test_stripe_key: test_stripe_key.c ../main/stripe_key.c ../main/stripe_key.h
+	$(CC) $(CFLAGS) -o $@ test_stripe_key.c ../main/stripe_key.c

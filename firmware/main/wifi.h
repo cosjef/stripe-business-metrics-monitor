@@ -38,6 +38,16 @@ esp_err_t wifi_start_ap(char *out_ssid, size_t out_ssid_len);
  */
 esp_err_t wifi_start_sta(const char *ssid, const char *pass);
 
+/*
+ * Run AP and station modes at once.
+ *
+ * Needed for the key-entry phase: the customer's phone stays joined to the
+ * setup AP looking at the portal, while the device simultaneously reaches
+ * Stripe over their network to validate the key (spec 9.1 step 4).
+ */
+esp_err_t wifi_start_apsta(char *out_ap_ssid, size_t out_ap_ssid_len,
+                           const char *sta_ssid, const char *sta_pass);
+
 /* Current state, for the display to render. */
 wifi_state_t wifi_get_state(void);
 

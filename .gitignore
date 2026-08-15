@@ -29,3 +29,4 @@ firmware/test/test_screens
 firmware/test/test_tapdetect
 firmware/test/test_tapstatus
 firmware/test/test_provision
+firmware/test/test_stripe_key

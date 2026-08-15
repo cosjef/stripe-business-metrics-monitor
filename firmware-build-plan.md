@@ -14,8 +14,8 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 | Starting point | Waveshare `ESP32-S3-Touch-LCD-1.54` GitHub repo, `05_lvgl_example` | Drop the `esp_lcd_touch_cst816s` dependency. **Confirmed by I2C scan** that no touch controller exists on this board — see "Input: no touch controller" below. |
 | Input | **Single hard tap**, detected HOST-SIDE from raw accelerometer magnitude (QMI8658 at I2C `0x6B`) | No touch hardware. Departs from spec §1 principle 3 ("no interaction"). The chip's own tap engine never fires on this part; ships with a documented false-trigger trade-off. See below. |
 | Fonts | **Roboto Condensed Bold (SIL OFL)**, generated to LVGL bitmap fonts at 12 sizes (18/20/22 UI + 24/32/40/52/60/64/76/88/96 hero) via `tools/gen_fonts.sh` | See "Typeface deviation from spec §5.4" below. LVGL's stock Montserrat was rejected (caps at 48px vs the spec's 96px hero max); SF Compact was rejected as non-redistributable. |
-| HTTPS/TLS client | **Not yet decided** | Open gap — see below. |
-| JSON parsing | **Not yet decided** | Open gap — see below. |
+| HTTPS/TLS client | `esp_http_client` + **`CONFIG_MBEDTLS_CERTIFICATE_BUNDLE`** | Espressif ships Mozilla's CA roots and maintains them, so certificate rotation is not our problem — spec §8.2 names manual CA-bundle upkeep as a real cost of the MCU path. Pinning only Stripe's current root was rejected: it is smaller, but a root rotation would brick every device in the field until firmware is updated. |
+| JSON parsing | **cJSON, full-buffer** (ships with ESP-IDF) | Spec §8.3 mandates a filtered streaming parse, assuming ~320KB of heap. This board reports **8MB PSRAM** (confirmed at Stage 1 boot), so a 300–400KB subscriptions page fits with enormous margin. Simpler code, which is what should be handling money figures. |
 
 ### Verified board configuration
 
@@ -98,82 +98,7 @@ Consequences (already implemented):
 
 Still outstanding: the generated font set is **2.9MB**, against the spec's ~20KB estimate (§5.4) — full ASCII at 4bpp, uncompressed. Fits comfortably in the 6MB partition, but trimming to the spec's actual glyph set (digits, currency, ~12 uppercase) would cut it by well over an order of magnitude.
 
-**Open gaps (flag before Stage 4):**
-- TLS client library for calling the Stripe API from ESP-IDF (e.g. `esp-tls` / `esp_http_client` native to IDF vs. something else). No board-specific issues surfaced in research so far, but unverified for this exact pairing.
-- JSON parsing approach: **likely resolved in favor of full-buffer parsing.** Boot log confirms `esp_psram: Found 8MB PSRAM device` and `Adding pool of 8192K of PSRAM memory to heap allocator` — a 300-400KB response fits with enormous margin, so the spec's §8.3 streaming-parse requirement (written assuming ~320KB total heap) does not apply to this board. Confirm with a real payload at Stage 5 before closing.
-
----
-
-## Stage 0: Environment (done 2026-08-15)
-
-- [x] Board enumerates over USB — `/dev/cu.usbmodem3101` (ESP32-S3 native USB, no CP210x/CH340 driver needed)
-- [x] ESP-IDF v5.5.1 cloned to `~/esp/esp-idf`, toolchain installed for `esp32s3` (satisfies Waveshare's `idf: '>=5.4'`)
-- [x] Xtensa compiler verified: `xtensa-esp-elf-gcc 14.2.0`
-- [x] `cmake` / `ninja` installed via Homebrew (ESP-IDF's macOS installer does not bundle these)
-- [x] Firmware project scaffolded at `firmware/`
-
-## Stage 1: Display hello-world
-
-Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the three-zone skeleton renders correctly with hardcoded data.
-
-- [x] Pin definitions captured from Waveshare's non-touch demo into `main/board_config.h`
-- [x] Spec constants (baselines, palette, size floors) captured into `main/layout.h`
-- [x] Hero auto-sizing (§2.4) implemented in `main/hero_size.c` as `hero_size_for_text()` — per-glyph width measurement, real screen-deck values, the `$145k` overflow case, monotonicity, unknown-glyph fallback
-- [x] Baseline positioning extracted to `main/baseline.c` and tested (LVGL positions by top-left, the spec by baseline)
-- [x] Monospace→Roboto Condensed typeface change (see deviation section above), fonts generated and flashed
-- [x] **177 host checks passing across three suites** (`cd firmware/test && make`). Coverage of host-testable modules: 94.5% line, 100% function
-- [x] Minimal `esp_lcd` + `esp_lvgl_port` + LVGL project written (`main/display.c`, `main/main.c`), touch dependency dropped
-- [x] **Project builds** (`idf.py build`) — 1.07MB binary, 83% of app partition free
-- [x] Flashed to board, boots clean with no panics; display init sequence confirmed in log (SPI → panel IO → ST7789 → `display ready: 240x240`), LVGL task running
-- [x] Baseline positioning uses real font metrics (`line_height - base_line`) rather than approximating; fixed a bug where one shared `static lv_style_t` was overwritten by every label
-- [x] Colors correct on glass — required `invert_color(true)` **and** removing the double byte-swap (`swap_bytes` was set in both `sdkconfig` and the LVGL port config, cancelling out and transposing red/blue)
-- [x] **Render the three-zone skeleton (§5.1) — visually confirmed on hardware 2026-08-15.** Label at y=16, hero baseline y=150, subtitle baseline y=178, six rotation dots at y=214 with index 0 filled. Black field, Roboto Condensed Bold in warm off-white, green subtitle. All elements correct.
-- [x] Fixed invisible rotation dots — `lv_obj_remove_style_all()` resets `bg_opa` to transparent, so the dots were being drawn but not painted
-- [ ] Confirm partial-window update path (CASET/RASET, §5.3) works — measure actual redraw time, compare to spec's ~11ms partial / ~25ms full estimate
-- [ ] Confirm 16px padding / 208px usable column matches spec measurements on real hardware
-- [ ] **Trim the font set.** Currently 2.9MB (full ASCII 0x20–0x7A at 4bpp, uncompressed) vs the spec's ~20KB estimate (§5.4). Restrict to the glyphs the screen deck actually uses — digits, `$.,%+-kMK`, and the ~12 uppercase letters in the labels — and re-enable compression. Do this **before Stage 3**, when WiFi + TLS + CA bundles start competing for flash. Note: changing the glyph range means regenerating the advance table via `tools/dump_advances.py`.
-
-## Testing status
-
-`cd firmware/test && make` — **699 checks across seven suites, all passing.**
-(`make quick` runs the six logic suites without building LVGL.)
-
-| Suite | Covers |
-|---|---|
-| `test_hero_size` | per-glyph width measurement, 208px column constraint, large-account overflow, monotonicity, unknown-glyph fallback |
-| `test_font_coverage` | every size `hero_size_for_text()` can return has a generated font that declares its symbol |
-| `test_layout` | baseline→top-left conversion, spec baselines on-screen at all sizes, font-lookup coverage, palette renderability and contrast, layout geometry invariants |
-| `test_screens` | **pixel-level**, through real LVGL: background color, padding/column limits, ink on baselines, rotation dot states, green discipline, state-screen colors, skeleton stability |
-
-**The LVGL host harness** (`test/harness.c`) boots LVGL against an offscreen 240×240 RGB565 framebuffer — the same color format the panel uses, so assertions see the same quantization the device produces. `test/lv_conf.h` mirrors the device's Kconfig settings (16-bit color, dark theme) so the harness cannot drift into testing a different configuration than the one that ships. Failing screens dump to `/tmp/fail_*.ppm` for inspection.
-
-This exists because Stage 1 found every visual bug by photographing the device. The harness now covers that class automatically: the inverted colors, the theme overpainting the background, the unreachable `#121211`, and the invisible rotation dots would each fail a test today.
-
-| Module | Coverage |
-|---|---|
-| `main/hero_size.c` | 88.6% line, 100% function |
-| `main/baseline.c` | 100% line, 100% function |
-| `main/screens.c` | covered by pixel assertions (all 9 screens rendered and inspected) |
-| `main/display.c` (SPI/ST7789 bring-up) | **0% — needs real hardware** |
-
-**Remaining gap:** panel bring-up itself — SPI bus, ST7789 init, backlight, and the LVGL port wiring. That code is inherently hardware-coupled and is verified by the device booting and rendering. Everything above it is now tested on the host.
-
-## Stage 2: Bitmap font + layout engine
-
-Goal: pure rendering logic, testable without any network code, producing all 9 static screen mockups from hardcoded fixture data.
-
-- [x] Hero-size auto-computation — done in Stage 1 as `hero_size_for_text()`. Note this no longer uses the spec's `len × 0.6em` formula; see the typeface deviation section.
-- [x] 208px column overflow check — done in Stage 1 as `text_fits()`, measuring real glyph advances
-- [ ] ~~Negative letter-spacing (~-0.02em) on hero values~~ — **dropped.** Spec §5.4 recommends this to pull *monospace* digits toward a proportional appearance; Roboto Condensed is already proportional and condensed, so it no longer applies. Revisit only if the hero looks loose on glass.
-- [x] **LVGL host harness** (`test/harness.c`) — renders screens offscreen so they can be asserted on pixel by pixel, no panel needed. See "Testing status" above.
-- [x] **All drawing extracted to `main/screens.c`**, which depends only on LVGL. The same code runs on the device and under test; `main.c` keeps hardware bring-up and the rotation timer.
-- [x] Render all 6 rotation screens (MRR, New Paid, Paid Subs, Trials, Conversion, Last Event) from fixture values — pixel-tested
-- [x] Render all 3 state screens (Stale, Auth Error, Setup) from fixture values — pixel-tested
-- [x] **8-second rotation loop** with dots reflecting position (§6.1) — confirmed on hardware, advancing every 8000ms
-- [x] Typeface decision resolved — Roboto Condensed Bold, generated at all 12 spec sizes (see deviation section)
-- [x] **Tap-to-advance navigation via the IMU** — see "Input: no touch controller" below
-- [ ] Conditional churn screen: enters rotation only when nonzero for the period (§6.1) — deferred to Stage 6, since it needs real data to be meaningful
-- [ ] Visually confirm the remaining 8 screens on glass (only MRR has been photographed; the rest are pixel-tested but unseen)
+**Open gaps: both closed at Stage 4** (see the toolchain table above). The TLS client uses Espressif's maintained CA bundle, and JSON is parsed full-buffer with cJSON — the spec's streaming requirement (§8.3) does not apply to a board with 8MB PSRAM.
 
 ### Input: no touch controller (measured 2026-08-15)
 

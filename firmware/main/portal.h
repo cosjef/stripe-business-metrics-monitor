@@ -9,6 +9,9 @@
 
 #include "esp_err.h"
 
+#include <stdbool.h>
+#include <stddef.h>
+
 /*
  * Called when the customer submits valid credentials. The portal has already
  * validated them with wifi_creds_validate(). Strings are only valid for the
@@ -16,8 +19,16 @@
  */
 typedef void (*portal_creds_cb_t)(const char *ssid, const char *pass);
 
+/*
+ * Called after WiFi is up, to validate a Stripe key against the live API
+ * (spec 9.1 step 4). Fills `out_msg` with a human-readable result either way;
+ * on success that is the customer's own account state, which the spec calls
+ * the moment that converts skeptics. Returns true if the key was accepted.
+ */
+typedef bool (*portal_key_cb_t)(const char *key, char *out_msg, size_t msg_len);
+
 /* Start the HTTP server and DNS responder. Requires AP mode to be running. */
-esp_err_t portal_start(portal_creds_cb_t on_creds);
+esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key);
 
 /* Stop both, freeing their sockets and tasks. */
 void portal_stop(void);

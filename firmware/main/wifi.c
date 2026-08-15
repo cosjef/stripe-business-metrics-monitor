@@ -156,6 +156,50 @@ esp_err_t wifi_start_sta(const char *ssid, const char *pass)
     return ESP_OK;
 }
 
+esp_err_t wifi_start_apsta(char *out_ap_ssid, size_t out_ap_ssid_len,
+                           const char *sta_ssid, const char *sta_pass)
+{
+    ESP_RETURN_ON_FALSE(sta_ssid && sta_ssid[0], ESP_ERR_INVALID_ARG,
+                        TAG, "empty sta ssid");
+
+    uint8_t mac[6] = {0};
+    ESP_RETURN_ON_ERROR(esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP), TAG, "read mac failed");
+
+    char ap_ssid[SETUP_SSID_LEN];
+    setup_ssid_from_mac(mac, ap_ssid, sizeof(ap_ssid));
+
+    wifi_config_t ap_cfg = {0};
+    strncpy((char *)ap_cfg.ap.ssid, ap_ssid, sizeof(ap_cfg.ap.ssid));
+    ap_cfg.ap.ssid_len = (uint8_t)strlen(ap_ssid);
+    ap_cfg.ap.channel = AP_CHANNEL;
+    ap_cfg.ap.max_connection = AP_MAX_CONNECTIONS;
+    ap_cfg.ap.authmode = WIFI_AUTH_OPEN;
+
+    wifi_config_t sta_cfg = {0};
+    strncpy((char *)sta_cfg.sta.ssid, sta_ssid, sizeof(sta_cfg.sta.ssid) - 1);
+    if (sta_pass) {
+        strncpy((char *)sta_cfg.sta.password, sta_pass,
+                sizeof(sta_cfg.sta.password) - 1);
+    }
+    sta_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+
+    s_retries = 0;
+    s_state = WIFI_STATE_CONNECTING;
+
+    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "set APSTA failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_AP, &ap_cfg), TAG, "AP config failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &sta_cfg), TAG, "STA config failed");
+    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "wifi start failed");
+
+    if (out_ap_ssid && out_ap_ssid_len) {
+        strncpy(out_ap_ssid, ap_ssid, out_ap_ssid_len - 1);
+        out_ap_ssid[out_ap_ssid_len - 1] = '\0';
+    }
+
+    ESP_LOGI(TAG, "AP \"%s\" up, joining \"%s\"", ap_ssid, sta_ssid);
+    return ESP_OK;
+}
+
 wifi_state_t wifi_get_state(void)
 {
     return s_state;

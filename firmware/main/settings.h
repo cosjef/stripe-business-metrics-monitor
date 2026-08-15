@@ -14,6 +14,7 @@
 
 #include "esp_err.h"
 #include "provision.h"
+#include "stripe_key.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -49,3 +50,12 @@ esp_err_t settings_set_wifi(const char *ssid, const char *pass);
  * is revoked.
  */
 esp_err_t settings_clear_wifi(void);
+
+/* True if a validated Stripe key has been stored. */
+bool settings_have_stripe_key(void);
+
+/* Read the stored Stripe key. Buffer should be STRIPE_KEY_MAX_LEN + 1. */
+esp_err_t settings_get_stripe_key(char *key, size_t key_len);
+
+/* Store a Stripe key. Should only be called after live validation. */
+esp_err_t settings_set_stripe_key(const char *key);

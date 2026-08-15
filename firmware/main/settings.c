@@ -11,6 +11,7 @@ static const char *TAG = "settings";
 #define NVS_NAMESPACE "stripedev"
 #define KEY_WIFI_SSID "wifi_ssid"
 #define KEY_WIFI_PASS "wifi_pass"
+#define KEY_STRIPE     "stripe_key"
 
 esp_err_t settings_init(void)
 {
@@ -123,5 +124,58 @@ esp_err_t settings_clear_wifi(void)
 
     nvs_close(h);
     ESP_LOGI(TAG, "cleared stored credentials");
+    return err;
+}
+
+bool settings_have_stripe_key(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) {
+        return false;
+    }
+
+    size_t len = 0;
+    const esp_err_t err = nvs_get_str(h, KEY_STRIPE, NULL, &len);
+    nvs_close(h);
+
+    return err == ESP_OK && len > 1;
+}
+
+esp_err_t settings_get_stripe_key(char *key, size_t key_len)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    size_t len = key_len;
+    err = nvs_get_str(h, KEY_STRIPE, key, &len);
+    nvs_close(h);
+    return err;
+}
+
+esp_err_t settings_set_stripe_key(const char *key)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    err = nvs_set_str(h, KEY_STRIPE, key);
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    if (err == ESP_OK) {
+        /* Log only the redacted form: serial output is routinely shared during
+         * support, and a whole key must never appear in it. */
+        char redacted[64];
+        stripe_key_redact(key, redacted, sizeof(redacted));
+        ESP_LOGI(TAG, "stored Stripe key %s", redacted);
+    }
+
     return err;
 }
