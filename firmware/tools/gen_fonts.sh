@@ -2,7 +2,7 @@
 #
 # Generate LVGL bitmap fonts at the spec's sizes.
 #
-# Face: SF Compact Bold.
+# Face: Roboto Condensed Bold (SIL Open Font License).
 #
 # Spec 5.4 calls for a monospace face, on the grounds that tabular figures stop
 # numbers jittering when 94 becomes 100. We tested that on hardware and chose
@@ -12,11 +12,19 @@
 # jitter the monospace rule was protecting against, and the hero swaps whole
 # screens every 8s rather than ticking digits in place.
 #
-# SF Compact is Apple's small-screen face; Bold survives backlight bleed on IPS
-# without closing up the counters the way Heavy/Black do.
+# Roboto Condensed is Android's condensed system face, designed for screen
+# legibility, with counters that stay open at Bold. Being condensed, it also
+# buys a size step over wider faces: "$6.5k" renders at 88px here versus 64px
+# in SF Compact, i.e. 10.1mm versus 7.4mm -- "across the room" rather than
+# merely "glanceable" in the spec 2.2 table.
 #
-# The .ttf here is a static instance (wght=790) extracted from the system's
-# variable SFCompact.ttf, vendored so this build is reproducible.
+# Licensing matters here: an earlier iteration used SF Compact (Apple system
+# font), which cannot be redistributed. Since the spec contemplates selling
+# this device, the face must be one we can ship. Roboto Condensed is OFL --
+# see LICENSE-RobotoCondensed.txt alongside the .ttf.
+#
+# The .ttf is a static wght=700 instance of Google's variable RobotoCondensed,
+# vendored so this build is reproducible without network access.
 #
 # IMPORTANT: if the face or weight changes, regenerate the advance-width table
 # in main/hero_size.c too, or sizing will disagree with what LVGL renders. See
@@ -27,7 +35,7 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-FONT="$HERE/fonts/SFCompact-Bold.ttf"
+FONT="$HERE/fonts/RobotoCondensed-Bold.ttf"
 OUT="$(cd "$HERE/.." && pwd)/main/fonts"
 
 # Hero sizes must match hero_font_sizes[] in main/hero_size.c.

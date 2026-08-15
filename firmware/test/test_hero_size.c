@@ -46,11 +46,18 @@ static void test_width_is_per_glyph(void)
 {
     printf("width measurement is per-glyph\n");
 
-    check_true("'111' narrower than '888'",
-               text_width_px("111", 64) < text_width_px("888", 64));
+    /* Roboto Condensed has TABULAR figures: every digit shares one advance.
+     * This is the anti-jitter property spec 5.4 wanted, and we get it here
+     * without paying monospace's cost on letters and punctuation. */
+    check_int("'111' same width as '888'",
+              text_width_px("111", 64), text_width_px("888", 64));
 
-    check_true("'1' narrower than '8'",
-               text_width_px("1", 96) < text_width_px("8", 96));
+    check_int("'1' same width as '8'",
+              text_width_px("1", 96), text_width_px("8", 96));
+
+    /* Letters, unlike digits, are genuinely proportional. */
+    check_true("'i' narrower than 'W'",
+               text_width_px("i", 64) < text_width_px("W", 64));
 
     /* '.' is much narrower than a digit -- the whole reason monospace looked
      * bad here (it reserved a full digit cell for the period). */
@@ -94,14 +101,20 @@ static void test_real_screen_values(void)
 {
     printf("real values from the screen deck\n");
 
-    /* Spec renders these at 60-88px; with a proportional face we should meet or
-     * beat that, since we are no longer paying for a full cell per period. */
-    check_true("'$6.5k' >= 60px", hero_size_for_text("$6.5k") >= 60);
-    check_true("'2' >= 88px",     hero_size_for_text("2") >= 88);
-    check_true("'94' >= 88px",    hero_size_for_text("94") >= 88);
-    check_true("'11' >= 88px",    hero_size_for_text("11") >= 88);
-    check_true("'34%' >= 64px",   hero_size_for_text("34%") >= 64);
-    check_true("'+$29' >= 52px",  hero_size_for_text("+$29") >= 52);
+    /* Spec renders these at 60-88px. A condensed face beats that across the
+     * board, since it neither pays monospace's per-period cell nor a wide
+     * face's letterforms. These lower bounds lock in that gain -- if a future
+     * font change regresses them, the device gets harder to read. */
+    check_true("'$6.5k' >= 88px", hero_size_for_text("$6.5k") >= 88);
+    check_true("'2' >= 96px",     hero_size_for_text("2") >= 96);
+    check_true("'94' >= 96px",    hero_size_for_text("94") >= 96);
+    check_true("'11' >= 96px",    hero_size_for_text("11") >= 96);
+    check_true("'34%' >= 88px",   hero_size_for_text("34%") >= 88);
+    check_true("'+$29' >= 88px",  hero_size_for_text("+$29") >= 88);
+
+    /* Large accounts stay well above the spec's "comfortable" 34px band. */
+    check_true("'$145k' >= 76px",  hero_size_for_text("$145k") >= 76);
+    check_true("'$1.45M' >= 64px", hero_size_for_text("$1.45M") >= 64);
 }
 
 /*

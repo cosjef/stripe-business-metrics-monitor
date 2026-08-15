@@ -17,7 +17,7 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
-FONT = os.path.join(os.path.dirname(__file__), "fonts", "SFCompact-Bold.ttf")
+FONT = os.path.join(os.path.dirname(__file__), "fonts", "RobotoCondensed-Bold.ttf")
 
 # Must match RANGE in gen_fonts.sh and GLYPH_FIRST/GLYPH_LAST in hero_size.c.
 FIRST, LAST = 0x20, 0x7A

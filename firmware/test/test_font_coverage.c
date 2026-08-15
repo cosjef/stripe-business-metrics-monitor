@@ -32,7 +32,7 @@ static const int ui_sizes[] = {SIZE_FOOTER, SIZE_LABEL, SIZE_SUBTITLE};
 static int font_file_exists(int size)
 {
     char path[256];
-    snprintf(path, sizeof(path), "../main/fonts/stripe_mono_%d.c", size);
+    snprintf(path, sizeof(path), "../main/fonts/stripe_sans_%d.c", size);
     FILE *f = fopen(path, "r");
     if (f) {
         fclose(f);
@@ -49,8 +49,8 @@ static int font_declares_symbol(int size)
 {
     char path[256];
     char needle[64];
-    snprintf(path, sizeof(path), "../main/fonts/stripe_mono_%d.c", size);
-    snprintf(needle, sizeof(needle), "stripe_mono_%d", size);
+    snprintf(path, sizeof(path), "../main/fonts/stripe_sans_%d.c", size);
+    snprintf(needle, sizeof(needle), "stripe_sans_%d", size);
 
     FILE *f = fopen(path, "r");
     if (!f) {
@@ -77,10 +77,10 @@ static void test_every_hero_size_has_a_font(void)
         int size = hero_font_sizes[i];
         char what[96];
 
-        snprintf(what, sizeof(what), "stripe_mono_%d.c exists", size);
+        snprintf(what, sizeof(what), "stripe_sans_%d.c exists", size);
         check_true(what, font_file_exists(size));
 
-        snprintf(what, sizeof(what), "stripe_mono_%d declares lv_font_t", size);
+        snprintf(what, sizeof(what), "stripe_sans_%d declares lv_font_t", size);
         check_true(what, font_declares_symbol(size));
     }
 }
@@ -93,7 +93,7 @@ static void test_every_ui_size_has_a_font(void)
         int size = ui_sizes[i];
         char what[96];
 
-        snprintf(what, sizeof(what), "stripe_mono_%d.c exists (UI)", size);
+        snprintf(what, sizeof(what), "stripe_sans_%d.c exists (UI)", size);
         check_true(what, font_file_exists(size));
     }
 }
