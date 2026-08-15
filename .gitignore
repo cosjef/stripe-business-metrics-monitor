@@ -21,5 +21,6 @@ fontenv/
 # macOS
 .DS_Store
 
-# Apple system font instance -- not redistributable. See tools/gen_fonts.sh.
-firmware/tools/fonts/*.ttf
+# Note: firmware/tools/fonts/RobotoCondensed-Bold.ttf IS tracked -- it is SIL
+# OFL and redistributable, and the build needs it to regenerate glyphs.
+# Do not vendor non-redistributable system fonts (e.g. Apple's SF family) here.
