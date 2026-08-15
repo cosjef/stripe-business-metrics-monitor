@@ -28,6 +28,7 @@ static TaskHandle_t s_dns_task = NULL;
 static int s_dns_sock = -1;
 static portal_creds_cb_t s_on_creds = NULL;
 static portal_key_cb_t s_on_key = NULL;
+static bool s_key_phase = false;
 
 /*
  * The setup page.
@@ -194,8 +195,18 @@ static esp_err_t serve_form(httpd_req_t *req, const char *error)
     return ESP_OK;
 }
 
+/* Forward declaration: "/" serves the key page during the key phase. */
+static esp_err_t serve_key_page(httpd_req_t *req, const char *banner,
+                                bool banner_is_error);
+
 static esp_err_t get_handler(httpd_req_t *req)
 {
+    /* Once WiFi is stored, "/" must be the key form. Serving the WiFi form
+     * again invites the customer to re-enter details that are already saved,
+     * which reads as setup being stuck. */
+    if (s_key_phase) {
+        return serve_key_page(req, NULL, false);
+    }
     return serve_form(req, NULL);
 }
 
@@ -400,10 +411,12 @@ static void dns_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key)
+esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key,
+                       bool key_phase)
 {
     s_on_creds = on_creds;
     s_on_key = on_key;
+    s_key_phase = key_phase;
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
@@ -438,7 +451,8 @@ esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key)
 
     xTaskCreate(dns_task, "dns", 4096, NULL, 5, &s_dns_task);
 
-    ESP_LOGI(TAG, "portal at http://%s/", PORTAL_IP_STR);
+    ESP_LOGI(TAG, "portal at http://%s/ (%s phase)", PORTAL_IP_STR,
+             s_key_phase ? "key" : "wifi");
     return ESP_OK;
 }
 

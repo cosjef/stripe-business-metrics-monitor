@@ -28,7 +28,16 @@ typedef void (*portal_creds_cb_t)(const char *ssid, const char *pass);
 typedef bool (*portal_key_cb_t)(const char *key, char *out_msg, size_t msg_len);
 
 /* Start the HTTP server and DNS responder. Requires AP mode to be running. */
-esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key);
+/*
+ * `key_phase` selects what "/" serves.
+ *
+ * false: the WiFi credential form (first-run).
+ * true:  the Stripe key form, because WiFi is already configured. Without
+ *        this the customer lands on the WiFi form again, re-enters details
+ *        that are already stored, and setup appears to stall.
+ */
+esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key,
+                       bool key_phase);
 
 /* Stop both, freeing their sockets and tasks. */
 void portal_stop(void);

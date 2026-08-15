@@ -206,7 +206,7 @@ static void run_setup_mode(void)
 {
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(wifi_start_ap(s_setup_ssid, sizeof(s_setup_ssid)));
-    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key));
+    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key, false));
     show_setup_screen();
 }
 
@@ -232,7 +232,7 @@ static void run_key_setup_mode(void)
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(wifi_start_apsta(s_setup_ssid, sizeof(s_setup_ssid),
                                      ssid, pass));
-    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key));
+    ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key, true));
 
     lvgl_port_lock(0);
     screen_draw_setup(lv_screen_active(), "Add Stripe key", s_setup_ssid,
