@@ -10,7 +10,7 @@ Not affiliated with Stripe.
 
 Stages 1-2 of 8 complete: display bring-up and the full screen deck. All nine
 screens (six rotating metrics, three device states) render from fixture data,
-rotating every 8 seconds on hardware, with double-tap navigation via the onboard
+rotating every 8 seconds on hardware, with tap-to-advance navigation via the onboard
 IMU to skip ahead. No networking yet.
 
 See [firmware-build-plan.md](firmware-build-plan.md) for the staged plan and
@@ -47,9 +47,9 @@ cd firmware/test
 make
 ```
 
-277 checks across five suites. Four cover pure logic (text measurement, hero
+311 checks across five suites. Four cover pure logic (text measurement, hero
 auto-sizing, baseline positioning, font coverage, palette constraints, and
-double-tap detection); the fifth boots real LVGL against an offscreen
+tap detection); the fifth boots real LVGL against an offscreen
 framebuffer and asserts on actual pixels — background color, ink position,
 rotation dot state, and color discipline for all nine screens.
 
