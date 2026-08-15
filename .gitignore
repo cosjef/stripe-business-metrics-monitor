@@ -13,6 +13,7 @@ firmware/sdkconfig.old
 # Host test binaries and their debug bundles
 firmware/test/test_hero_size
 firmware/test/test_font_coverage
+firmware/test/test_layout
 *.dSYM/
 
 # Python venv used for font tooling
