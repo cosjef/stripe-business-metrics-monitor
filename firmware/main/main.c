@@ -1,147 +1,119 @@
 /*
- * Stripe Revenue Display -- Stage 1 bring-up.
+ * Stripe Revenue Display -- Stage 2.
  *
- * Renders the three-zone skeleton (spec 5.1) with hardcoded values, to prove
- * the hardware path and validate layout geometry on real glass before any
- * network code exists.
+ * Rotates through the six metric screens (spec 6.1) on an 8-second timer,
+ * driven by hardcoded fixture data. No networking yet; Stage 4 replaces the
+ * fixtures with live Stripe values.
  *
- * Typeface: SF Compact Bold, not the monospace face spec 5.4 calls for. See
- * tools/gen_fonts.sh for the reasoning and hero_size.h for what that changes
- * about width measurement.
+ * All drawing lives in screens.c, which depends only on LVGL and is covered by
+ * pixel tests in the host harness (firmware/test/test_screens.c). This file
+ * owns hardware bring-up and the rotation timer only.
  *
- * Known Stage 1 limitations, tracked in firmware-build-plan.md:
- *   - No partial-window updates yet (spec 5.3); LVGL redraws as it sees fit.
- *   - Single hardcoded screen; rotation and the other eight screens are Stage 2.
+ * Known Stage 2 limitations, tracked in firmware-build-plan.md:
+ *   - No partial-window updates (spec 5.3); LVGL redraws as it sees fit.
+ *   - Fixture data, so no stale/auth states are reachable at runtime yet --
+ *     those screens exist and are tested, but nothing triggers them.
  */
 #include "display.h"
 #include "board_config.h"
 #include "layout.h"
 #include "hero_size.h"
-#include "baseline.h"
-#include "fonts.h"
+#include "screens.h"
 #include "colortest.h"
-
-/* Set to 1 to draw the color diagnostic instead of the skeleton. */
-#define COLORTEST_ENABLED 0
-
-#include <string.h>
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "esp_timer.h"
 
 static const char *TAG = "main";
 
-/* Hardcoded Stage 1 fixture, matching the MRR mockup in 01-mrr.png */
-#define FIXTURE_LABEL     "MRR"
-#define FIXTURE_HERO      "$6.5k"
-#define FIXTURE_SUBTITLE  "+$118 today"
-#define FIXTURE_DOT_INDEX (0)
-#define FIXTURE_DOT_COUNT (6)
+/* Set to 1 to draw the color diagnostic instead of the rotation. */
+#define COLORTEST_ENABLED 0
 
 /*
- * Create a label whose *baseline* sits at `baseline_y`.
+ * Fixture values, matching the spec's screen deck (6.1) and its mockup images.
+ * Replaced by live data in Stage 4.
  *
- * The spec positions everything by baseline (5.1); LVGL positions by top-left.
- * A font's baseline sits `line_height - base_line` below its top edge, where
- * lv_font_t.base_line is the descent below the baseline.
+ * Note the churn screen from 6.1 is deliberately absent: it enters rotation
+ * only when nonzero, so it needs real data to make sense.
  */
-static lv_obj_t *make_label(lv_obj_t *parent, const char *text,
-                            const lv_font_t *font, uint32_t color,
-                            int x, int baseline_y)
+static const screen_data_t s_rotation[] = {
+    {
+        .label = "MRR", .hero = "$6.5k", .subtitle = "+$118 today",
+        .hero_is_gain = 0, .subtitle_is_gain = 1,
+    },
+    {
+        /* A realized gain, so the hero is green (spec 4.2). */
+        .label = "NEW PAID", .hero = "2", .subtitle = "today, $58 MRR",
+        .hero_is_gain = 1, .subtitle_is_gain = 0,
+    },
+    {
+        .label = "PAID SUBS", .hero = "94", .subtitle = "+7 this month",
+        .hero_is_gain = 0, .subtitle_is_gain = 1,
+    },
+    {
+        /* Not green: a trial is not yet revenue (spec 6.1). */
+        .label = "TRIALS", .hero = "11", .subtitle = "3 end this week",
+        .hero_is_gain = 0, .subtitle_is_gain = 0,
+    },
+    {
+        .label = "CONVERSION", .hero = "34%", .subtitle = "trial to paid",
+        .hero_is_gain = 0, .subtitle_is_gain = 0,
+    },
+    {
+        .label = "LAST EVENT", .hero = "+$29", .subtitle = "new paid, 2m",
+        .hero_is_gain = 1, .subtitle_is_gain = 0,
+    },
+};
+
+#define ROTATION_COUNT ((int)(sizeof(s_rotation) / sizeof(s_rotation[0])))
+
+static int s_index = 0;
+
+static void show_current(void)
 {
-    lv_obj_t *label = lv_label_create(parent);
-    lv_label_set_text(label, text);
+    screen_data_t d = s_rotation[s_index];
+    d.dot_index = s_index;
+    d.dot_count = ROTATION_COUNT;
 
-    /* Per-object local styles, not a shared static style -- a single static
-     * lv_style_t reused across labels would apply the last-set font and color
-     * to every one of them. */
-    lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lvgl_port_lock(0);
+    screen_draw_rotation(lv_screen_active(), &d);
+    lvgl_port_unlock();
 
-    lv_obj_set_pos(label, x,
-                   baseline_to_top(baseline_y,
-                                   (int)lv_font_get_line_height(font),
-                                   (int)font->base_line));
-
-    return label;
+    ESP_LOGI(TAG, "[%d/%d] %s: '%s' at %dpx",
+             s_index + 1, ROTATION_COUNT, d.label, d.hero,
+             hero_size_for_text(d.hero));
 }
 
-static void draw_rotation_dots(lv_obj_t *parent, int active, int total)
+static void rotate_cb(void *arg)
 {
-    const int span = (total - 1) * DOTS_GAP;
-    const int x0 = (LCD_H_RES - span) / 2;
-
-    for (int i = 0; i < total; i++) {
-        lv_obj_t *dot = lv_obj_create(parent);
-        /* Drop theme borders/shadows/padding; a dot is just a filled circle. */
-        lv_obj_remove_style_all(dot);
-        lv_obj_set_size(dot, DOTS_RADIUS * 2, DOTS_RADIUS * 2);
-        lv_obj_set_pos(dot, x0 + i * DOTS_GAP - DOTS_RADIUS,
-                       DOTS_CENTER_Y - DOTS_RADIUS);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(
-            dot, lv_color_hex(i == active ? COLOR_PRIMARY : COLOR_INACTIVE), 0);
-        /* remove_style_all() leaves bg_opa transparent; without this the dots
-         * are painted but invisible. */
-        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(dot, 0, 0);
-        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
-    }
-}
-
-static void draw_skeleton(void)
-{
-    lv_obj_t *scr = lv_screen_active();
-
-    /* Strip the theme's styling first. LVGL's default theme paints its own
-     * background onto the screen; leaving it in place lets the theme color
-     * show through instead of ours. */
-    lv_obj_remove_style_all(scr);
-
-    /* #121211, not pure black -- an IPS backlight makes #000000 read as dark
-     * charcoal with visible edge bleed (spec 3.1). */
-    lv_obj_set_style_bg_color(scr, lv_color_hex(COLOR_BG), 0);
-    lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-
-    /* The label's y=16 in the spec is the top of the text block, not a
-     * baseline (5.1), so offset by the ascent to land it correctly. */
-    const lv_font_t *label_font = font_for_size(SIZE_LABEL);
-    make_label(scr, FIXTURE_LABEL, label_font, COLOR_MUTED, PAD_PX,
-               LABEL_BASELINE_Y + font_ascent((int)lv_font_get_line_height(label_font),
-                                              (int)label_font->base_line));
-
-    /* Hero size is computed from the value, never hardcoded (spec 2.4). */
-    const int hero_px = hero_size_for_text(FIXTURE_HERO);
-    make_label(scr, FIXTURE_HERO, font_for_size(hero_px), COLOR_PRIMARY,
-               PAD_PX, HERO_BASELINE_Y);
-
-    /* Green means exactly one thing: realized positive movement (spec 4.2). */
-    make_label(scr, FIXTURE_SUBTITLE, font_for_size(SIZE_SUBTITLE), COLOR_GREEN,
-               PAD_PX, SUBTITLE_BASELINE_Y);
-
-    draw_rotation_dots(scr, FIXTURE_DOT_INDEX, FIXTURE_DOT_COUNT);
+    (void)arg;
+    s_index = (s_index + 1) % ROTATION_COUNT;
+    show_current();
 }
 
 void app_main(void)
 {
     ESP_ERROR_CHECK(display_init());
 
-    const int hero_px = hero_size_for_text(FIXTURE_HERO);
-    ESP_LOGI(TAG, "hero '%s': %dpx (%.1fmm at 8.7px/mm), width %d/%dpx",
-             FIXTURE_HERO, hero_px, hero_px / 8.7,
-             text_width_px(FIXTURE_HERO, hero_px), TEXT_COLUMN_PX);
-
-    lvgl_port_lock(0);
 #if COLORTEST_ENABLED
+    lvgl_port_lock(0);
     colortest_draw();
-#else
-    draw_skeleton();
-#endif
     lvgl_port_unlock();
+    ESP_LOGI(TAG, "color test rendered");
+    return;
+#endif
 
-    ESP_LOGI(TAG, "%s rendered",
-             COLORTEST_ENABLED ? "color test" : "skeleton");
+    show_current();
+
+    const esp_timer_create_args_t timer_args = {
+        .callback = rotate_cb,
+        .name = "rotation",
+    };
+    esp_timer_handle_t timer;
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, ROTATION_INTERVAL_MS * 1000));
+
+    ESP_LOGI(TAG, "rotating %d screens every %dms",
+             ROTATION_COUNT, ROTATION_INTERVAL_MS);
 }

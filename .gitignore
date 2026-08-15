@@ -25,3 +25,4 @@ fontenv/
 # Note: firmware/tools/fonts/RobotoCondensed-Bold.ttf IS tracked -- it is SIL
 # OFL and redistributable, and the build needs it to regenerate glyphs.
 # Do not vendor non-redistributable system fonts (e.g. Apple's SF family) here.
+firmware/test/test_screens
