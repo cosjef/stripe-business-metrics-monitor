@@ -12,7 +12,7 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 | Framework | ESP-IDF (not Arduino) | User choice. More setup than Arduino but no HAL abstraction tax. |
 | Graphics | `esp_lcd` (`esp_lcd_panel_st7789`) + `esp_lvgl_port` + LVGL 9 | This is what Waveshare's own ESP-IDF example for this exact board uses. Confirmed 2026-08-15 via Waveshare's repo (`examples/ESP32-S3-LCD-1.54-demo/ESP-IDF-5.5.1/05_lvgl_example`). Rejected LovyanGFX for IDF — technically possible but thinly documented outside Arduino, not what Waveshare ships. |
 | Starting point | Waveshare `ESP32-S3-Touch-LCD-1.54` GitHub repo, `05_lvgl_example` | Drop the `esp_lcd_touch_cst816s` dependency (touch component, not present on our non-touch board). |
-| Fonts | **SF Compact Bold**, generated to LVGL bitmap fonts at 12 sizes (18/20/22 UI + 24/32/40/52/60/64/76/88/96 hero) via `tools/gen_fonts.sh` | See "Typeface deviation from spec §5.4" below. LVGL's stock Montserrat was rejected (proportional, caps at 48px vs the spec's 96px hero max). |
+| Fonts | **Roboto Condensed Bold (SIL OFL)**, generated to LVGL bitmap fonts at 12 sizes (18/20/22 UI + 24/32/40/52/60/64/76/88/96 hero) via `tools/gen_fonts.sh` | See "Typeface deviation from spec §5.4" below. LVGL's stock Montserrat was rejected (caps at 48px vs the spec's 96px hero max); SF Compact was rejected as non-redistributable. |
 | HTTPS/TLS client | **Not yet decided** | Open gap — see below. |
 | JSON parsing | **Not yet decided** | Open gap — see below. |
 
@@ -59,31 +59,43 @@ Re-run `main/colortest.c` if the panel, driver, or backlight setting ever change
 
 ### Typeface deviation from spec §5.4 (decided 2026-08-15)
 
-**The spec mandates monospace; this build uses SF Compact Bold (proportional). Deliberate, tested on hardware.**
+**The spec mandates monospace; this build uses Roboto Condensed Bold. Deliberate, tested on hardware.**
 
 Spec §5.4 requires monospace so tabular figures stop numbers jittering when 94 becomes 100. On the real panel, Courier New was hard to read — a typewriter face with thin strokes, which is exactly what goes fuzzy on a 220 PPI backlit IPS panel. Candidates were rendered at true 240×240 and compared:
 
-| Face | Kind | `$6.5k` width @64px | Tabular digits |
-|---|---|---:|---|
-| Courier New | mono | 192px | yes |
-| Andale Mono | mono | 192px | yes |
-| SF Mono | mono | 198px | yes |
-| **SF Compact Bold** | **prop** | **178px** | **no** |
-| Helvetica Neue | prop | 158px | yes |
-| SF (system) | prop | 160px | no |
+| Face | Kind | `$6.5k` width @64px | Tabular digits | Redistributable |
+|---|---|---:|---|---|
+| Courier New | mono | 192px | yes | no (Monotype) |
+| Andale Mono | mono | 192px | yes | no |
+| SF Mono | mono | 198px | yes | no (Apple) |
+| SF Compact Bold | prop | 178px | no | no (Apple) |
+| Helvetica Neue | prop | 158px | yes | no |
+| **Roboto Condensed Bold** | **prop** | **146px** | **yes** | **yes (SIL OFL)** |
 
 Why the deviation is safe:
-- **Monospace wastes the column.** It reserves a full character cell for `.`, so glyphs shrink to compensate. SF Compact renders *larger* letterforms in *less* width — directly serving §2.2, the legibility rule the whole device is built on.
-- **The jitter §5.4 guards against barely applies here.** Left alignment (§5.2) already anchors values at a fixed left edge, and the hero swaps whole screens every 8s rather than ticking digits in place. A rendered jitter test (94→100, $6.5k→$11.1k) showed no objectionable shift in any candidate.
-- **Weight matters more than width on a backlit panel.** Weights Medium→Black were compared; **Bold (wght=790)** was chosen — Heavy/Black start closing the counters in `6`, `5`, `$`, which hurts legibility at distance.
+- **Monospace wastes the column.** It reserves a full character cell for `.`, so glyphs shrink to compensate. A condensed proportional face renders *larger* letterforms in *less* width — directly serving §2.2, the legibility rule the whole device is built on.
+- **Roboto Condensed has tabular figures anyway** (all digits advance 505/1000 em), so it keeps the anti-jitter property §5.4 wanted, while letters stay proportional. The rule's goal is met by a different means.
+- **Left alignment already mitigates jitter.** §5.2 anchors values at a fixed left edge, and the hero swaps whole screens every 8s rather than ticking digits in place. A rendered jitter test (94→100, $6.5k→$11.1k) showed no objectionable shift in any candidate.
+
+Because it is condensed, values size up a step versus wider faces — measured on hardware:
+
+| Value | Monospace | SF Compact | **Roboto Condensed** |
+|---|---:|---:|---:|
+| `$6.5k` | 60px | 64px | **88px** (10.1mm) |
+| `$145k` | — | 64px | **76px** |
+| `$1.45M` | — | 52px | **64px** |
+
+88px is "across the room" in the spec §2.2 table, where 64px is only "glanceable".
+
+**Licensing:** an earlier iteration used SF Compact, which is an Apple system font and cannot be redistributed — a blocker given §9 contemplates selling this device. Roboto Condensed is SIL OFL; its license is vendored at `tools/fonts/LICENSE-RobotoCondensed.txt`.
 
 Consequences (already implemented):
-- `MONO_ADVANCE_EM` **removed** from `layout.h`. The spec's `len × size × 0.6em` width formula is invalid for a proportional face — digits alone range 0.489em (`1`) to 0.649em (`8`), a 33% spread.
+- `MONO_ADVANCE_EM` **removed** from `layout.h`. The spec's `len × size × 0.6em` width formula is invalid for a proportional face.
 - `hero_size_for_length(size_t)` **replaced** by `hero_size_for_text(const char *)`. Width depends on *which* characters, not how many.
-- `main/hero_size.c` carries a per-glyph advance table (0x20–0x7A) extracted from the vendored font. **If the face or weight changes, regenerate it with `tools/dump_advances.py`** or sizing will silently disagree with what LVGL renders. A test verifies the table matches the vendored font.
-- The instantiated font (`tools/fonts/SFCompact-Bold.ttf`, a static `wght=790` instance of the system variable font) is vendored for reproducibility.
+- `main/hero_size.c` carries a per-glyph advance table (0x20–0x7A) extracted from the vendored font. **If the face or weight changes, regenerate it with `tools/dump_advances.py`** or sizing will silently disagree with what LVGL renders.
+- The font (`tools/fonts/RobotoCondensed-Bold.ttf`, a static `wght=700` instance of Google's variable original) is vendored so the build works offline.
 
-Still outstanding: the generated font set is **3.3MB**, against the spec's ~20KB estimate (§5.4) — full ASCII at 4bpp, uncompressed. Fits comfortably in the 6MB partition, but trimming to the spec's actual glyph set (digits, currency, ~12 uppercase) would cut it by well over an order of magnitude.
+Still outstanding: the generated font set is **2.9MB**, against the spec's ~20KB estimate (§5.4) — full ASCII at 4bpp, uncompressed. Fits comfortably in the 6MB partition, but trimming to the spec's actual glyph set (digits, currency, ~12 uppercase) would cut it by well over an order of magnitude.
 
 **Open gaps (flag before Stage 4):**
 - TLS client library for calling the Stripe API from ESP-IDF (e.g. `esp-tls` / `esp_http_client` native to IDF vs. something else). No board-specific issues surfaced in research so far, but unverified for this exact pairing.
@@ -105,18 +117,41 @@ Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the th
 
 - [x] Pin definitions captured from Waveshare's non-touch demo into `main/board_config.h`
 - [x] Spec constants (baselines, palette, size floors) captured into `main/layout.h`
-- [x] Hero auto-sizing (§2.4) implemented in `main/hero_size.c` as `hero_size_for_text()`, **84 host tests passing** (`firmware/test/`) — per-glyph width measurement, real screen-deck values, the `$145k` overflow case, monotonicity, and unknown-glyph fallback
-- [x] Monospace→proportional typeface change (see deviation section above), fonts generated and flashed
+- [x] Hero auto-sizing (§2.4) implemented in `main/hero_size.c` as `hero_size_for_text()` — per-glyph width measurement, real screen-deck values, the `$145k` overflow case, monotonicity, unknown-glyph fallback
+- [x] Baseline positioning extracted to `main/baseline.c` and tested (LVGL positions by top-left, the spec by baseline)
+- [x] Monospace→Roboto Condensed typeface change (see deviation section above), fonts generated and flashed
+- [x] **177 host checks passing across three suites** (`cd firmware/test && make`). Coverage of host-testable modules: 94.5% line, 100% function
 - [x] Minimal `esp_lcd` + `esp_lvgl_port` + LVGL project written (`main/display.c`, `main/main.c`), touch dependency dropped
 - [x] **Project builds** (`idf.py build`) — 1.07MB binary, 83% of app partition free
 - [x] Flashed to board, boots clean with no panics; display init sequence confirmed in log (SPI → panel IO → ST7789 → `display ready: 240x240`), LVGL task running
 - [x] Baseline positioning uses real font metrics (`line_height - base_line`) rather than approximating; fixed a bug where one shared `static lv_style_t` was overwritten by every label
 - [x] Colors correct on glass — required `invert_color(true)` **and** removing the double byte-swap (`swap_bytes` was set in both `sdkconfig` and the LVGL port config, cancelling out and transposing red/blue)
-- [x] **Render the three-zone skeleton (§5.1) — visually confirmed on hardware 2026-08-15.** Label at y=16, hero baseline y=150, subtitle baseline y=178, six rotation dots at y=214 with index 0 filled. Black field, SF Compact Bold in warm off-white, green subtitle. All elements correct.
+- [x] **Render the three-zone skeleton (§5.1) — visually confirmed on hardware 2026-08-15.** Label at y=16, hero baseline y=150, subtitle baseline y=178, six rotation dots at y=214 with index 0 filled. Black field, Roboto Condensed Bold in warm off-white, green subtitle. All elements correct.
 - [x] Fixed invisible rotation dots — `lv_obj_remove_style_all()` resets `bg_opa` to transparent, so the dots were being drawn but not painted
 - [ ] Confirm partial-window update path (CASET/RASET, §5.3) works — measure actual redraw time, compare to spec's ~11ms partial / ~25ms full estimate
 - [ ] Confirm 16px padding / 208px usable column matches spec measurements on real hardware
-- [ ] **Trim the font set.** Currently 3.3MB (full ASCII 0x20–0x7A at 4bpp, uncompressed) vs the spec's ~20KB estimate (§5.4). Restrict to the glyphs the screen deck actually uses — digits, `$.,%+-kMK`, and the ~12 uppercase letters in the labels — and re-enable compression. Do this **before Stage 3**, when WiFi + TLS + CA bundles start competing for flash. Note: changing the glyph range means regenerating the advance table via `tools/dump_advances.py`.
+- [ ] **Trim the font set.** Currently 2.9MB (full ASCII 0x20–0x7A at 4bpp, uncompressed) vs the spec's ~20KB estimate (§5.4). Restrict to the glyphs the screen deck actually uses — digits, `$.,%+-kMK`, and the ~12 uppercase letters in the labels — and re-enable compression. Do this **before Stage 3**, when WiFi + TLS + CA bundles start competing for flash. Note: changing the glyph range means regenerating the advance table via `tools/dump_advances.py`.
+
+## Testing status
+
+`cd firmware/test && make` — **177 checks across three suites, all passing.**
+
+| Suite | Covers |
+|---|---|
+| `test_hero_size` | per-glyph width measurement, 208px column constraint, large-account overflow, monotonicity, unknown-glyph fallback |
+| `test_font_coverage` | every size `hero_size_for_text()` can return has a generated font that declares its symbol |
+| `test_layout` | baseline→top-left conversion, spec baselines on-screen at all sizes, font-lookup coverage, palette renderability and contrast, layout geometry invariants |
+
+| Module | Coverage |
+|---|---|
+| `main/hero_size.c` | 88.6% line, 100% function |
+| `main/baseline.c` | 100% line, 100% function |
+| **host-testable total** | **94.5% line, 100% function** |
+| `main/display.c`, `main/main.c` drawing, `main/fonts/fonts.c` | **0% — not host-testable** |
+
+**Known gap.** Hardware-coupled code (SPI setup, ST7789 init, LVGL wiring, drawing calls) has no automated test. Every visual bug in Stage 1 — inverted colors, the LVGL theme painting over the background, invisible rotation dots — was caught by photographing the screen, not by a test. The palette tests in `test_layout` now catch the *class* of bug behind the background failure, but not rendering itself.
+
+Closing this needs an **LVGL host harness**: build LVGL for the host, render a screen into a memory buffer, and assert on pixels (background color, text position, dot visibility). Worth doing before or early in Stage 2 — nine screens verified by photograph does not scale, and Stage 2 is where the screen count multiplies.
 
 ## Stage 2: Bitmap font + layout engine
 
@@ -124,10 +159,10 @@ Goal: pure rendering logic, testable without any network code, producing all 9 s
 
 - [x] Hero-size auto-computation — done in Stage 1 as `hero_size_for_text()`. Note this no longer uses the spec's `len × 0.6em` formula; see the typeface deviation section.
 - [x] 208px column overflow check — done in Stage 1 as `text_fits()`, measuring real glyph advances
-- [ ] ~~Negative letter-spacing (~-0.02em) on hero values~~ — **dropped.** Spec §5.4 recommends this to pull *monospace* digits toward a proportional appearance; SF Compact is already proportional, so it no longer applies. Revisit only if the hero looks loose on glass.
+- [ ] ~~Negative letter-spacing (~-0.02em) on hero values~~ — **dropped.** Spec §5.4 recommends this to pull *monospace* digits toward a proportional appearance; Roboto Condensed is already proportional and condensed, so it no longer applies. Revisit only if the hero looks loose on glass.
 - [ ] Render all 6 rotation screens (MRR, New Paid, Paid Subs, Trials, Conversion, Last Event) from hardcoded fixture values, compare visually against `01-mrr.png` and the spec's other screen mockups
 - [ ] Render all 3 state screens (Stale, Auth Error, Setup) from hardcoded fixture values
-- [x] Typeface decision resolved — SF Compact Bold, generated at all 12 spec sizes (see deviation section)
+- [x] Typeface decision resolved — Roboto Condensed Bold, generated at all 12 spec sizes (see deviation section)
 
 ## Stage 3: WiFi + captive portal setup flow (State C)
 

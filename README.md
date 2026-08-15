@@ -45,6 +45,12 @@ cd firmware/test
 make
 ```
 
+177 checks across three suites, covering text width measurement, hero
+auto-sizing, baseline positioning, font coverage, and palette constraints.
+
+Hardware-coupled code (`display.c`, the drawing calls in `main.c`) is **not**
+covered — it needs LVGL and a panel. See "Testing status" in the build plan.
+
 ## Regenerating fonts
 
 The LVGL bitmap fonts in `firmware/main/fonts/` are generated from the vendored
@@ -78,8 +84,9 @@ spec. All are documented with reasoning in
 
 2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace spends
    a full character cell on `.`, shrinking digits enough to hurt legibility at
-   50cm. Roboto Condensed renders `$6.5k` at 88px where monospace managed 64px.
-   It also has tabular figures, so it keeps the anti-jitter property that
+   50cm. Roboto Condensed renders `$6.5k` at 88px (10.1mm, "across the room" in
+   the spec 2.2 table) where monospace managed 60px. It also has tabular figures
+   — all digits advance 505/1000 em — so it keeps the anti-jitter property that
    motivated the monospace rule in the first place.
 
 3. **Full-buffer JSON parsing is probably viable (spec 8.3).** The spec assumes
