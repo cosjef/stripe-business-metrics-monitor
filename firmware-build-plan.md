@@ -11,7 +11,8 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 | Hardware | Waveshare ESP32-S3-LCD-1.54 (non-touch), ST7789, 240x240, SPI, 8MB PSRAM, 16MB flash | Confirmed via product research 2026-08-15. PSRAM headroom means the spec's "must stream-parse, 300KB won't fit in heap" concern (§8.3) is likely avoidable — full-buffer JSON parsing may be viable. Revisit at Stage 4/5. |
 | Framework | ESP-IDF (not Arduino) | User choice. More setup than Arduino but no HAL abstraction tax. |
 | Graphics | `esp_lcd` (`esp_lcd_panel_st7789`) + `esp_lvgl_port` + LVGL 9 | This is what Waveshare's own ESP-IDF example for this exact board uses. Confirmed 2026-08-15 via Waveshare's repo (`examples/ESP32-S3-LCD-1.54-demo/ESP-IDF-5.5.1/05_lvgl_example`). Rejected LovyanGFX for IDF — technically possible but thinly documented outside Arduino, not what Waveshare ships. |
-| Starting point | Waveshare `ESP32-S3-Touch-LCD-1.54` GitHub repo, `05_lvgl_example` | Drop the `esp_lcd_touch_cst816s` dependency (touch component, not present on our non-touch board). |
+| Starting point | Waveshare `ESP32-S3-Touch-LCD-1.54` GitHub repo, `05_lvgl_example` | Drop the `esp_lcd_touch_cst816s` dependency. **Confirmed by I2C scan** that no touch controller exists on this board — see "Input: no touch controller" below. |
+| Input | **Double tap**, detected via the onboard QMI8658 IMU at I2C `0x6B` | No touch hardware. Departs from spec §1 principle 3 ("no interaction"); see below. |
 | Fonts | **Roboto Condensed Bold (SIL OFL)**, generated to LVGL bitmap fonts at 12 sizes (18/20/22 UI + 24/32/40/52/60/64/76/88/96 hero) via `tools/gen_fonts.sh` | See "Typeface deviation from spec §5.4" below. LVGL's stock Montserrat was rejected (caps at 48px vs the spec's 96px hero max); SF Compact was rejected as non-redistributable. |
 | HTTPS/TLS client | **Not yet decided** | Open gap — see below. |
 | JSON parsing | **Not yet decided** | Open gap — see below. |
@@ -134,8 +135,8 @@ Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the th
 
 ## Testing status
 
-`cd firmware/test && make` — **260 checks across four suites, all passing.**
-(`make quick` runs the three logic suites without building LVGL.)
+`cd firmware/test && make` — **277 checks across five suites, all passing.**
+(`make quick` runs the four logic suites without building LVGL.)
 
 | Suite | Covers |
 |---|---|
@@ -170,8 +171,30 @@ Goal: pure rendering logic, testable without any network code, producing all 9 s
 - [x] Render all 3 state screens (Stale, Auth Error, Setup) from fixture values — pixel-tested
 - [x] **8-second rotation loop** with dots reflecting position (§6.1) — confirmed on hardware, advancing every 8000ms
 - [x] Typeface decision resolved — Roboto Condensed Bold, generated at all 12 spec sizes (see deviation section)
+- [x] **Double-tap navigation via the IMU** — see "Input: no touch controller" below
 - [ ] Conditional churn screen: enters rotation only when nonzero for the period (§6.1) — deferred to Stage 6, since it needs real data to be meaningful
 - [ ] Visually confirm the remaining 8 screens on glass (only MRR has been photographed; the rest are pixel-tested but unseen)
+
+### Input: no touch controller (measured 2026-08-15)
+
+**Spec §1 principle 3 says "no interaction, no menus, no touch." This build adds double-tap navigation — a deliberate departure.** Waiting out the 8-second interval to see one specific metric is a real annoyance in use. Rotation is never suspended, so the device remains the rotating instrument the spec describes; tapping only advances it early.
+
+**This board has no touch controller.** An I2C scan (`GPIO41`/`GPIO42`) found five devices and nothing at `0x15` where a CST816S would answer:
+
+| Address | Device |
+|---|---|
+| 0x13 | ES7210 audio ADC |
+| 0x18 | ES8311 audio codec |
+| 0x40 | power monitor |
+| **0x6B** | **QMI8658 IMU** (WHO_AM_I 0x05, rev 0x7C) |
+
+Waveshare's "Touch Version Options" refers to the `ESP32-S3-Touch-LCD-1.54` SKU, a different part number. Note the IMU answers at **0x6B, not 0x6A** — 0x6A appears in the scan but returns an invalid ID.
+
+**Double tap, not single.** A single tap is far too easy to trigger by setting the device down; an appliance that changes screens when nudged is worse than one that ignores you.
+
+Measured tap magnitudes: **3272–7803 mg**, against a 1450 mg threshold and ~1000 mg at rest — a 2–5× margin, with no false positives across testing.
+
+**I2C bus speed matters here.** At 400kHz, reads failed constantly *while tapping* — striking the case disturbs the bus, and the failures dropped exactly the samples tap detection needs. At 100kHz the drop rate is under 1%. If tap detection ever becomes unreliable, check the drop rate in the periodic `imu:` health log before adjusting thresholds.
 
 ## Stage 3: WiFi + captive portal setup flow (State C)
 
