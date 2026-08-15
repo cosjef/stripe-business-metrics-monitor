@@ -10,8 +10,12 @@ Not affiliated with Stripe.
 
 Stages 1-2 of 8 complete: display bring-up and the full screen deck. All nine
 screens (six rotating metrics, three device states) render from fixture data,
-rotating every 8 seconds on hardware, with tap-to-advance navigation via the onboard
-IMU to skip ahead. No networking yet.
+rotating every 8 seconds on hardware, with tap-to-advance navigation via the
+onboard IMU to skip ahead. No networking yet.
+
+Tap navigation ships with a known trade-off: it reliably detects taps but
+occasionally advances on its own (roughly once per 20s idle). See the build
+plan for why, and why the PLUS button would be the robust fix.
 
 See [firmware-build-plan.md](firmware-build-plan.md) for the staged plan and
 progress, and [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md)
@@ -47,11 +51,11 @@ cd firmware/test
 make
 ```
 
-311 checks across five suites. Four cover pure logic (text measurement, hero
-auto-sizing, baseline positioning, font coverage, palette constraints, and
-tap detection); the fifth boots real LVGL against an offscreen
-framebuffer and asserts on actual pixels — background color, ink position,
-rotation dot state, and color discipline for all nine screens.
+666 checks across six suites. Five cover pure logic (text measurement, hero
+auto-sizing, baseline positioning, font coverage, palette constraints, tap
+detection, and IMU register decoding); the sixth boots real LVGL against an
+offscreen framebuffer and asserts on actual pixels — background color, ink
+position, rotation dot state, and color discipline for all nine screens.
 
 `make quick` skips the LVGL build and runs only the logic suites.
 

@@ -135,8 +135,8 @@ Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the th
 
 ## Testing status
 
-`cd firmware/test && make` — **311 checks across five suites, all passing.**
-(`make quick` runs the four logic suites without building LVGL.)
+`cd firmware/test && make` — **666 checks across six suites, all passing.**
+(`make quick` runs the five logic suites without building LVGL.)
 
 | Suite | Covers |
 |---|---|
@@ -190,22 +190,29 @@ Goal: pure rendering logic, testable without any network code, producing all 9 s
 
 Waveshare's "Touch Version Options" refers to the `ESP32-S3-Touch-LCD-1.54` SKU, a different part number. Note the IMU answers at **0x6B, not 0x6A** — 0x6A appears in the scan but returns an invalid ID.
 
-**Single tap, not double.** An earlier version required a double tap, on the theory that a single tap is too easy to trigger accidentally. Instrumenting the IMU to log every impact — not just completed pairs — showed that was the wrong trade:
+**Single tap, not double.** An earlier version required a double tap. Measurement killed it: one physical tap produces several impacts as the case rings (gaps of 20-60 ms), and a natural gap between two taps measured ~570 ms median, straddling any pairing window. 48 impacts produced 14 accepted gestures that did not match what the user did.
 
-- One physical tap produces **several** impacts as the case rings out, at measured gaps of 20, 30, and 60 ms. Pairing logic cannot tell that from a deliberate second tap.
-- A natural gap between two taps measured **~570 ms median**, straddling any reasonable pairing window, so some pairs registered and some did not.
+**Detection is HOST-SIDE, from raw accelerometer magnitude — not the chip's tap engine.**
 
-The result was 48 impacts producing 14 accepted gestures that did not match what the user did. A single tap with a high threshold plus a lockout is both easier to perform and far more reliable.
+The QMI8658 has an on-chip tap detector and it was implemented here first. It never fired: zero detections across many counted tests, for impacts up to 8604 mg. Everything observable was verified correct — CTRL1/2/7/8 all read back as written, both CTRL9 `CONFIGURE_TAP` commands ACKed within 20ms, every CAL parameter read back intact, the accelerometer was running, sync-sample mode was off, and widening the peak/tap windows changed nothing. **Cause never found** on this part (WHO_AM_I 0x05, revision 0x7C). The configuration is retained in `imu.c` in case someone revisits it.
 
-Thresholds come from the measured distribution:
+**The shipped trade-off: reliable detection, with occasional false triggers.**
 
-| Population | Measured range |
-|---|---|
-| at rest | ~1000 mg |
-| ringing / incidental knocks | 1450–2700 mg |
-| **deliberate taps** | **4030–10433 mg** |
+Threshold is **4000 mg** — the setting that detected **5 of 5** taps in a counted test. It admits roughly **one spurious advance per 20 seconds idle**.
 
-`TAP_THRESHOLD_MG` is **4000**, sitting cleanly between the two populations, with a **500 ms lockout** to absorb ringing. Verified on hardware: 12 taps, 12 advances, zero misfires.
+That is not filtered out, because it cannot be without also rejecting real taps:
+
+| Filter tried | False triggers | Real taps detected |
+|---|---|---|
+| none (shipped) | ~1 per 20s idle | **5 of 5** |
+| require 2 consecutive elevated samples | 0 | **0 of 5** |
+| reject saturated axes | 0 | **2 of 5** |
+
+The reason is structural: this board's I2C bus intermittently returns corrupt reads that decode as large single-sample accelerations, and **a real tap also lands in exactly one 20ms sample**. The bus cannot be polled faster — 5-8ms tripped the task watchdog. Only the unambiguous corruption signature (all three axes reading identically) is filtered.
+
+**A real bug was found and fixed along the way.** `TAP_STATUS` bits 6:4 are a **three-bit** axis field; the code masked it with `0x03`, truncating it. Combined with an "axis == 0 means noise" filter, that silently discarded genuine taps. Now decoded in `tapstatus.c` with 337 host tests, including one asserting the buggy mask would fail. A code comment claiming axis *priority* gates which axes are watched was also wrong — the engine triggers on the square sum of all three axes; priority is only a tie-break.
+
+**If this needs to be better, use the PLUS button (GPIO4).** It is a debounced digital input with none of these failure modes, and Waveshare's own example for this SKU uses the three programmable buttons. Tap tuning cost roughly twenty hardware test rounds and landed on a compromise; the button would not.
 
 **I2C bus speed matters here.** At 400kHz, reads failed constantly *while tapping* — striking the case disturbs the bus, and the failures dropped exactly the samples tap detection needs. At 100kHz the drop rate is under 1%. If tap detection ever becomes unreliable, check the drop rate in the periodic `imu:` health log before adjusting thresholds.
 
