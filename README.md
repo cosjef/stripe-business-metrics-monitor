@@ -8,8 +8,9 @@ Not affiliated with Stripe.
 
 ## Status
 
-Stage 1 of 8 complete: display bring-up. The three-zone layout renders on
-hardware with the real palette and typeface. No networking yet.
+Stages 1-2 of 8 complete: display bring-up and the full screen deck. All nine
+screens (six rotating metrics, three device states) render from fixture data,
+rotating every 8 seconds on hardware. No networking yet.
 
 See [firmware-build-plan.md](firmware-build-plan.md) for the staged plan and
 progress, and [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md)
@@ -45,11 +46,16 @@ cd firmware/test
 make
 ```
 
-177 checks across three suites, covering text width measurement, hero
-auto-sizing, baseline positioning, font coverage, and palette constraints.
+260 checks across four suites. Three cover pure logic (text measurement, hero
+auto-sizing, baseline positioning, font coverage, palette constraints); the
+fourth boots real LVGL against an offscreen framebuffer and asserts on actual
+pixels — background color, ink position, rotation dot state, and color
+discipline for all nine screens.
 
-Hardware-coupled code (`display.c`, the drawing calls in `main.c`) is **not**
-covered — it needs LVGL and a panel. See "Testing status" in the build plan.
+`make quick` skips the LVGL build and runs only the logic suites.
+
+Panel bring-up itself (`display.c`: SPI, ST7789 init, backlight) is not
+covered — it needs real hardware.
 
 ## Regenerating fonts
 

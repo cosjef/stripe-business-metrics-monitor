@@ -134,24 +134,28 @@ Goal: prove the hardware path (SPI, ST7789 driver, panel init) works, and the th
 
 ## Testing status
 
-`cd firmware/test && make` — **177 checks across three suites, all passing.**
+`cd firmware/test && make` — **260 checks across four suites, all passing.**
+(`make quick` runs the three logic suites without building LVGL.)
 
 | Suite | Covers |
 |---|---|
 | `test_hero_size` | per-glyph width measurement, 208px column constraint, large-account overflow, monotonicity, unknown-glyph fallback |
 | `test_font_coverage` | every size `hero_size_for_text()` can return has a generated font that declares its symbol |
 | `test_layout` | baseline→top-left conversion, spec baselines on-screen at all sizes, font-lookup coverage, palette renderability and contrast, layout geometry invariants |
+| `test_screens` | **pixel-level**, through real LVGL: background color, padding/column limits, ink on baselines, rotation dot states, green discipline, state-screen colors, skeleton stability |
+
+**The LVGL host harness** (`test/harness.c`) boots LVGL against an offscreen 240×240 RGB565 framebuffer — the same color format the panel uses, so assertions see the same quantization the device produces. `test/lv_conf.h` mirrors the device's Kconfig settings (16-bit color, dark theme) so the harness cannot drift into testing a different configuration than the one that ships. Failing screens dump to `/tmp/fail_*.ppm` for inspection.
+
+This exists because Stage 1 found every visual bug by photographing the device. The harness now covers that class automatically: the inverted colors, the theme overpainting the background, the unreachable `#121211`, and the invisible rotation dots would each fail a test today.
 
 | Module | Coverage |
 |---|---|
 | `main/hero_size.c` | 88.6% line, 100% function |
 | `main/baseline.c` | 100% line, 100% function |
-| **host-testable total** | **94.5% line, 100% function** |
-| `main/display.c`, `main/main.c` drawing, `main/fonts/fonts.c` | **0% — not host-testable** |
+| `main/screens.c` | covered by pixel assertions (all 9 screens rendered and inspected) |
+| `main/display.c` (SPI/ST7789 bring-up) | **0% — needs real hardware** |
 
-**Known gap.** Hardware-coupled code (SPI setup, ST7789 init, LVGL wiring, drawing calls) has no automated test. Every visual bug in Stage 1 — inverted colors, the LVGL theme painting over the background, invisible rotation dots — was caught by photographing the screen, not by a test. The palette tests in `test_layout` now catch the *class* of bug behind the background failure, but not rendering itself.
-
-Closing this needs an **LVGL host harness**: build LVGL for the host, render a screen into a memory buffer, and assert on pixels (background color, text position, dot visibility). Worth doing before or early in Stage 2 — nine screens verified by photograph does not scale, and Stage 2 is where the screen count multiplies.
+**Remaining gap:** panel bring-up itself — SPI bus, ST7789 init, backlight, and the LVGL port wiring. That code is inherently hardware-coupled and is verified by the device booting and rendering. Everything above it is now tested on the host.
 
 ## Stage 2: Bitmap font + layout engine
 
@@ -160,9 +164,14 @@ Goal: pure rendering logic, testable without any network code, producing all 9 s
 - [x] Hero-size auto-computation — done in Stage 1 as `hero_size_for_text()`. Note this no longer uses the spec's `len × 0.6em` formula; see the typeface deviation section.
 - [x] 208px column overflow check — done in Stage 1 as `text_fits()`, measuring real glyph advances
 - [ ] ~~Negative letter-spacing (~-0.02em) on hero values~~ — **dropped.** Spec §5.4 recommends this to pull *monospace* digits toward a proportional appearance; Roboto Condensed is already proportional and condensed, so it no longer applies. Revisit only if the hero looks loose on glass.
-- [ ] Render all 6 rotation screens (MRR, New Paid, Paid Subs, Trials, Conversion, Last Event) from hardcoded fixture values, compare visually against `01-mrr.png` and the spec's other screen mockups
-- [ ] Render all 3 state screens (Stale, Auth Error, Setup) from hardcoded fixture values
+- [x] **LVGL host harness** (`test/harness.c`) — renders screens offscreen so they can be asserted on pixel by pixel, no panel needed. See "Testing status" above.
+- [x] **All drawing extracted to `main/screens.c`**, which depends only on LVGL. The same code runs on the device and under test; `main.c` keeps hardware bring-up and the rotation timer.
+- [x] Render all 6 rotation screens (MRR, New Paid, Paid Subs, Trials, Conversion, Last Event) from fixture values — pixel-tested
+- [x] Render all 3 state screens (Stale, Auth Error, Setup) from fixture values — pixel-tested
+- [x] **8-second rotation loop** with dots reflecting position (§6.1) — confirmed on hardware, advancing every 8000ms
 - [x] Typeface decision resolved — Roboto Condensed Bold, generated at all 12 spec sizes (see deviation section)
+- [ ] Conditional churn screen: enters rotation only when nonzero for the period (§6.1) — deferred to Stage 6, since it needs real data to be meaningful
+- [ ] Visually confirm the remaining 8 screens on glass (only MRR has been photographed; the rest are pixel-tested but unseen)
 
 ## Stage 3: WiFi + captive portal setup flow (State C)
 
