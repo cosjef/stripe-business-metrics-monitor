@@ -26,3 +26,4 @@ fontenv/
 # OFL and redistributable, and the build needs it to regenerate glyphs.
 # Do not vendor non-redistributable system fonts (e.g. Apple's SF family) here.
 firmware/test/test_screens
+firmware/test/test_tapdetect

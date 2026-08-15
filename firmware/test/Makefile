@@ -32,7 +32,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) $(SCREEN_BIN)
 
@@ -71,3 +71,6 @@ test: $(BINS)
 clean:
 	rm -f $(BINS)
 	rm -rf *.dSYM
+
+test_tapdetect: test_tapdetect.c ../main/tapdetect.c ../main/tapdetect.h
+	$(CC) $(CFLAGS) -o $@ test_tapdetect.c ../main/tapdetect.c

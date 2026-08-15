@@ -19,6 +19,7 @@
 #include "layout.h"
 #include "hero_size.h"
 #include "screens.h"
+#include "imu.h"
 #include "colortest.h"
 
 #include "esp_log.h"
@@ -69,8 +70,9 @@ static const screen_data_t s_rotation[] = {
 #define ROTATION_COUNT ((int)(sizeof(s_rotation) / sizeof(s_rotation[0])))
 
 static int s_index = 0;
+static esp_timer_handle_t s_rotation_timer = NULL;
 
-static void show_current(void)
+static void show_current(const char *why)
 {
     screen_data_t d = s_rotation[s_index];
     d.dot_index = s_index;
@@ -80,16 +82,37 @@ static void show_current(void)
     screen_draw_rotation(lv_screen_active(), &d);
     lvgl_port_unlock();
 
-    ESP_LOGI(TAG, "[%d/%d] %s: '%s' at %dpx",
+    ESP_LOGI(TAG, "[%d/%d] %s: '%s' at %dpx (%s)",
              s_index + 1, ROTATION_COUNT, d.label, d.hero,
-             hero_size_for_text(d.hero));
+             hero_size_for_text(d.hero), why);
+}
+
+static void advance(const char *why)
+{
+    s_index = (s_index + 1) % ROTATION_COUNT;
+    show_current(why);
 }
 
 static void rotate_cb(void *arg)
 {
     (void)arg;
-    s_index = (s_index + 1) % ROTATION_COUNT;
-    show_current();
+    advance("timer");
+}
+
+/*
+ * A double tap advances immediately and restarts the rotation timer, so the
+ * screen you asked for gets a full interval before it moves on. Rotation is
+ * never suspended -- the device is an appliance, and one left showing a single
+ * metric would stop being one (spec 1).
+ */
+static void on_double_tap(void)
+{
+    advance("tap");
+
+    if (s_rotation_timer) {
+        esp_timer_stop(s_rotation_timer);
+        esp_timer_start_periodic(s_rotation_timer, ROTATION_INTERVAL_MS * 1000);
+    }
 }
 
 void app_main(void)
@@ -104,16 +127,25 @@ void app_main(void)
     return;
 #endif
 
-    show_current();
+    show_current("boot");
 
     const esp_timer_create_args_t timer_args = {
         .callback = rotate_cb,
         .name = "rotation",
     };
-    esp_timer_handle_t timer;
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, ROTATION_INTERVAL_MS * 1000));
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_rotation_timer));
+    ESP_ERROR_CHECK(esp_timer_start_periodic(s_rotation_timer,
+                                             ROTATION_INTERVAL_MS * 1000));
 
     ESP_LOGI(TAG, "rotating %d screens every %dms",
              ROTATION_COUNT, ROTATION_INTERVAL_MS);
+
+    /* Double-tap navigation. The board has no touch controller, so the IMU is
+     * how a user skips ahead without waiting out the interval. A failure here
+     * is not fatal -- the device still rotates on its own. */
+    if (imu_init() == ESP_OK) {
+        ESP_ERROR_CHECK(imu_start_tap_watch(on_double_tap));
+    } else {
+        ESP_LOGW(TAG, "IMU unavailable; rotation is timer-only");
+    }
 }
