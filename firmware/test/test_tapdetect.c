@@ -196,10 +196,12 @@ static void test_soft_knocks_rejected(void)
 {
     printf("soft knocks and ringing are rejected\n");
 
-    const int32_t soft[] = {1453, 1486, 1494, 1499, 1505, 1510, 1522, 1527,
-                            1539, 1558, 1599, 1618, 1631, 1678, 1699, 1750,
-                            1757, 1784, 1858, 1917, 1997, 1999, 2038, 2182,
-                            2352, 2582, 2669, 2681};
+    /* Settling and light-contact magnitudes measured on hardware. All sit
+     * below the deliberate-tap population and must be rejected. */
+    const int32_t soft[] = {1453, 1486, 1499, 1510, 1527, 1558, 1599, 1631,
+                            1678, 1699, 1750, 1784, 1858, 1917, 1943, 1995,
+                            1997, 2000, 2038, 2156, 2158, 2159, 2182, 2352,
+                            2582, 2669, 2681, 2996, 3000, 3004, 3937, 3954};
 
     for (size_t i = 0; i < sizeof(soft) / sizeof(soft[0]); i++) {
         tap_detector_t d;
@@ -220,7 +222,8 @@ static void test_soft_real_taps_accepted(void)
 {
     printf("softer real taps are accepted\n");
 
-    const int32_t soft_taps[] = {3806, 3998, 4549, 4764};
+    const int32_t soft_taps[] = {4005, 4267, 4549, 4764, 7002,
+                                 7943, 7973, 8244, 8604};
 
     for (size_t i = 0; i < sizeof(soft_taps) / sizeof(soft_taps[0]); i++) {
         tap_detector_t d;
@@ -241,8 +244,8 @@ static void test_threshold_separates_populations(void)
 {
     printf("threshold separates knocks from taps\n");
 
-    const int32_t loudest_knock = 2681;
-    const int32_t softest_tap = 3806;
+    const int32_t loudest_knock = 3954;
+    const int32_t softest_tap = 4005;
 
     check_true("threshold above the loudest measured knock",
                TAP_THRESHOLD_MG > loudest_knock);

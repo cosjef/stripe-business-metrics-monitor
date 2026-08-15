@@ -1,7 +1,16 @@
+/*
+ * QMI8658 IMU: tap-to-advance navigation.
+ *
+ * Taps are detected HOST-SIDE from raw accelerometer magnitude (tapdetect.c),
+ * not by the chip's own tap engine. The engine is still configured below
+ * because that configuration is correct and was verified register-by-register,
+ * but it never once fired on this part (WHO_AM_I 0x05, revision 0x7C) across
+ * many counted tests, for impacts up to 8604 mg. The cause was never found.
+ * See tapdetect.h for the detection trade-off that ships.
+ */
 #include "imu.h"
-/* tapdetect.h is no longer used by the device: the chip detects taps itself.
- * The host-side detector and its tests remain in the tree as documentation of
- * why that approach was abandoned (see tapdetect.h). */
+#include "tapstatus.h"
+#include "tapdetect.h"
 
 #include "driver/i2c_master.h"
 #include "esp_check.h"
@@ -56,14 +65,43 @@ static const char *TAG = "imu";
  * Window values are in SAMPLES, so they only hold at the 500Hz ODR set in
  * CTRL2. Changing the ODR means rescaling these.
  */
-#define TAP_PRIORITY     0x04    /* Z > X > Y */
-#define TAP_PEAK_WINDOW  20
-#define TAP_TAP_WINDOW   50
-#define TAP_DTAP_WINDOW  250
+/*
+ * Axis priority (0x04 = Z > X > Y).
+ *
+ * This does NOT gate which axes are watched, and changing it does not affect
+ * sensitivity. The peak detector triggers on the SQUARE SUM of all three axes
+ * (datasheet 10.x: "If the square sum of the Linear Acceleration of three axes
+ * is higher than the PeakMagThr, the peak detecting is started"). Priority is
+ * only a tie-break, used to label TAP_AXIS when two or three axes peak at
+ * exactly the same sample.
+ *
+ * Recorded because an earlier version of this comment claimed the opposite and
+ * sent debugging down a dead end: impacts were being lost to a bad TAP_STATUS
+ * mask (see tapstatus.h), not to the priority setting.
+ */
+#define TAP_PRIORITY     0x04    /* Z > X > Y (tie-break only) */
+/*
+ * Windows, in SAMPLES at the 500Hz ODR set in CTRL2.
+ *
+ * Widened from the datasheet example (20/50/250). At 500Hz those are 40ms/
+ * 100ms/500ms, which assumes a sharp impulse reaching a bare sensor. Through a
+ * plastic case the impulse is spread out and damped, so a short peak window
+ * can reject it before the shape qualifies.
+ */
+#define TAP_PEAK_WINDOW  50    /* 100ms */
+#define TAP_TAP_WINDOW   150   /* 300ms */
+#define TAP_DTAP_WINDOW  400   /* 800ms */
 #define TAP_ALPHA        0x08    /* 0.0625, 7-bit fraction */
 #define TAP_GAMMA        0x20    /* 0.25,   7-bit fraction */
-#define TAP_PEAK_MAG_THR 0x0320  /* 0.8 g^2, 10-bit fraction */
-#define TAP_UDM_THR      0x0190  /* 0.4 g^2 */
+
+/*
+ * Magnitude thresholds for the chip's tap engine, in g^2 with a 10-bit
+ * fraction. These have no effect on shipped behavior -- the engine never
+ * fires -- and are retained only so the configuration stays complete if
+ * someone revisits it.
+ */
+#define TAP_PEAK_MAG_THR 0x0190  /* 0.4 g^2 */
+#define TAP_UDM_THR      0x00C8  /* 0.2 g^2 */
 
 /*
  * Poll interval.
@@ -72,8 +110,9 @@ static const char *TAG = "imu";
  * bus is shared with the audio codecs and is evidently marginal: at 5-8ms the
  * NACK rate climbed sharply and the task starved CPU 0's idle task badly
  * enough to trip the task watchdog. 20ms is well within FreeRTOS's 10ms tick
- * so the task yields cleanly, and the threshold was lowered to compensate for
- * sampling the impulse tail rather than its peak.
+ * so the task yields cleanly. The detection threshold is calibrated against
+ * what the host observes at this rate, which is the impulse TAIL rather than
+ * its peak.
  */
 #define POLL_INTERVAL_MS 20
 
@@ -146,7 +185,7 @@ static esp_err_t ctrl9_command(uint8_t cmd)
         }
     }
 
-    ESP_LOGE(TAG, "CTRL9 command 0x%02X not acknowledged", cmd);
+    ESP_LOGE(TAG, "CTRL9 command 0x%02X NOT acknowledged after 500ms", cmd);
     return ESP_ERR_TIMEOUT;
 }
 
@@ -188,13 +227,16 @@ static esp_err_t configure_tap_engine(void)
     ESP_RETURN_ON_ERROR(reg_write(REG_CAL4_H, 0x02), TAG, "CAL4_H set2");
     ESP_RETURN_ON_ERROR(ctrl9_command(CTRL9_CMD_CONFIGURE_TAP), TAG, "tap config set 2");
 
-    /* Accel back on. */
+    /* Accel back on, and give it time to start producing samples. The tap
+     * engine works off the sample stream, so enabling tap before the
+     * accelerometer is actually running may leave it inert. */
     ESP_RETURN_ON_ERROR(reg_write(REG_CTRL7, 0x01), TAG, "CTRL7 enable failed");
-    vTaskDelay(pdMS_TO_TICKS(20));
+    vTaskDelay(pdMS_TO_TICKS(200));
 
     /* Tap_EN (bit0) + poll-STATUSINT handshake (bit7), since we poll rather
      * than wire up an interrupt pin. */
     ESP_RETURN_ON_ERROR(reg_write(REG_CTRL8, 0x81), TAG, "CTRL8 failed");
+    vTaskDelay(pdMS_TO_TICKS(50));
 
     uint8_t c8 = 0;
     reg_read_retry(REG_CTRL8, &c8, 1);
@@ -206,6 +248,7 @@ static esp_err_t configure_tap_engine(void)
     vTaskDelay(pdMS_TO_TICKS(20));
     uint8_t discard = 0;
     reg_read(REG_STATUS1, &discard, 1);
+
 
     return ESP_OK;
 }
@@ -289,62 +332,110 @@ esp_err_t imu_read_accel(int16_t *x, int16_t *y, int16_t *z)
         return err;
     }
 
-    *x = (int16_t)((raw[1] << 8) | raw[0]);
-    *y = (int16_t)((raw[3] << 8) | raw[2]);
-    *z = (int16_t)((raw[5] << 8) | raw[4]);
+    const int16_t nx = (int16_t)((raw[1] << 8) | raw[0]);
+    const int16_t ny = (int16_t)((raw[3] << 8) | raw[2]);
+    const int16_t nz = (int16_t)((raw[5] << 8) | raw[4]);
+
+    /*
+     * Reject physically impossible samples.
+     *
+     * This bus is marginal, and some transactions return corrupt data that
+     * still passes the I2C layer's own checks. Observed while the device sat
+     * completely still: ax=ay=az=-3856 (three identical axes), and isolated
+     * "impacts" of 5000-10560 mg between consecutive 1002 mg samples. Those
+     * corrupt reads were being treated as taps, which is what made every
+     * threshold I tried behave inconsistently.
+     *
+     * All three axes reading identically is the clearest signature -- real
+     * acceleration essentially never produces that.
+     */
+    /*
+     * Reject the clearest corruption signature only: all three axes reading
+     * identically (observed as ax=ay=az=-3856 while the device sat still),
+     * which real acceleration essentially never produces.
+     *
+     * Deliberately NOT filtering saturated values here. Doing so cut false
+     * triggers to zero but also rejected 3 of 5 real taps, because a genuine
+     * tap through the case reaches full scale on one axis. See the trade-off
+     * note in tapdetect.h.
+     */
+    if (nx == ny && ny == nz && nx != 0) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
+    *x = nx;
+    *y = ny;
+    *z = nz;
     return ESP_OK;
 }
 
 /*
- * Poll the chip's tap flag.
+ * Detect taps from raw accelerometer magnitude.
  *
- * The tap engine runs on-chip at the full 500Hz ODR and LATCHES the event, so
- * the host only has to notice it before the next one. That is what makes this
- * work where host-side magnitude sampling did not: at the ~50 reads/sec this
- * shared I2C bus sustains, we were sampling between tap impulses and catching
- * them roughly half the time.
+ * WHY NOT THE CHIP'S TAP ENGINE. The QMI8658 has an on-chip tap detector, and
+ * it was implemented here first. It never fired -- zero detections across many
+ * counted tests, for impacts up to 8604 mg. Everything observable was verified
+ * correct: CTRL1/2/7/8 all read back as written, both CTRL9 CONFIGURE_TAP
+ * commands ACKed within 20ms, every CAL parameter read back intact, the
+ * accelerometer was enabled and producing data, sync-sample mode was off, and
+ * widening the peak/tap windows changed nothing. The cause was never found on
+ * this part (WHO_AM_I 0x05, revision 0x7C).
  *
- * STATUS1 clears on read, so each event is reported exactly once.
+ * Meanwhile the raw accelerometer reliably shows every tap: the diagnostic
+ * captured all 12 impacts in one 20-second run, cleanly separated from the
+ * noise floor. So this triggers on data we can actually see.
+ *
+ * The 20ms poll samples the impulse TAIL rather than its peak, which is why
+ * the threshold is calibrated against observed magnitudes rather than against
+ * what a tap "should" measure.
  */
 static void tap_task(void *arg)
 {
     (void)arg;
 
     uint32_t polls = 0, drops = 0, taps = 0;
+    int32_t diag_peak = 0;
+
+    tap_detector_t det;
+    tap_detector_init(&det);
+
 
     while (1) {
         polls++;
 
-        uint8_t status = 0;
-        if (reg_read(REG_STATUS1, &status, 1) != ESP_OK) {
+        int16_t ax = 0, ay = 0, az = 0;
+        if (imu_read_accel(&ax, &ay, &az) != ESP_OK) {
             drops++;
-        } else if (status & STATUS1_TAP) {
-            uint8_t detail = 0;
-            reg_read(REG_TAP_STATUS, &detail, 1);
+        } else {
+            const int32_t mag_mg = accel_magnitude_mg(ax, ay, az, IMU_LSB_PER_G);
+            const uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
 
-            /* TAP_STATUS: bits5:4 axis (1=X,2=Y,3=Z), bits1:0 count
-             * (1=single, 2=double). We treat any tap as "advance". */
-            const int axis = (detail >> 4) & 0x03;
-            const int count = detail & 0x03;
-
-            /* A real tap always names an axis (1=X, 2=Y, 3=Z). axis=0 means
-             * the flag was set without a corresponding detection -- treat it
-             * as noise rather than advancing the screen. */
-            if (axis == 0) {
-                continue;
+            if (mag_mg > diag_peak) {
+                diag_peak = mag_mg;
             }
 
-            taps++;
-            ESP_LOGI(TAG, "tap (axis=%d count=%d)", axis, count);
-            if (s_on_tap) {
-                s_on_tap();
+            /*
+             * NOTE: an earlier version required the elevated reading to
+             * persist across two consecutive samples, to reject corrupt I2C
+             * reads. That rejected every real tap too: at a 20ms poll the tap
+             * impulse lands in exactly ONE sample, so it can never be
+             * confirmed by a second. Corruption is filtered in
+             * imu_read_accel() by its signature instead.
+             */
+            if (tap_detector_feed(&det, mag_mg, now)) {
+                taps++;
+                ESP_LOGI(TAG, "tap (%ld mg)", (long)mag_mg);
+                if (s_on_tap) {
+                    s_on_tap();
+                }
             }
         }
 
         if (polls % 500 == 0) {
-            ESP_LOGI(TAG, "polls=%lu drops=%lu taps=%lu",
+            ESP_LOGI(TAG, "polls=%lu drops=%lu taps=%lu peak=%ld mg",
                      (unsigned long)polls, (unsigned long)drops,
-                     (unsigned long)taps);
+                     (unsigned long)taps, (long)diag_peak);
+            diag_peak = 0;
         }
 
         vTaskDelay(pdMS_TO_TICKS(POLL_INTERVAL_MS));
@@ -358,6 +449,6 @@ esp_err_t imu_start_tap_watch(void (*on_tap)(void))
     const BaseType_t ok = xTaskCreate(tap_task, "tap", 3072, NULL, 4, NULL);
     ESP_RETURN_ON_FALSE(ok == pdPASS, ESP_ERR_NO_MEM, TAG, "tap task failed");
 
-    ESP_LOGI(TAG, "watching for hardware tap events");
+    ESP_LOGI(TAG, "watching for taps (threshold %d mg, host-side)", TAP_THRESHOLD_MG);
     return ESP_OK;
 }

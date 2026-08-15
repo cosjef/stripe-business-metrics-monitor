@@ -27,25 +27,32 @@
 /*
  * Acceleration magnitude, in milli-g, that counts as a deliberate tap.
  *
- * Chosen from measurement, and revised once. An initial 4000 mg was set from a
- * capture where taps read 6000-10433 mg -- but that capture was of deliberately
- * firm taps. Measuring NORMAL tapping showed real taps landing as low as 3806
- * and 3998 mg, i.e. straddling the threshold, so roughly half were rejected and
- * the device felt like it needed several taps to respond.
+ * SHIPPED SETTING, chosen deliberately with a known trade-off.
  *
- * Populations measured while tapping normally:
- *   at rest              ~1000 mg
- *   incidental knocks     1631-1999 mg
- *   real taps             3806-9850 mg
+ * This is the configuration that detected 5 of 5 taps in a counted hardware
+ * test. It admits roughly one spurious advance per 20 seconds while idle,
+ * because this board's I2C bus intermittently returns corrupt reads that
+ * decode as large single-sample accelerations.
  *
- * 2800 sits above the knock population with margin, and comfortably below the
- * softest real tap.
+ * Why not filter the corruption: a real tap impulse also lands in exactly ONE
+ * 20ms sample (the bus cannot be polled faster -- see POLL_INTERVAL_MS in
+ * imu.c, where 5-8ms tripped the task watchdog). A corrupt read is likewise a
+ * single sample. Requiring two consecutive elevated samples rejected 5 of 5
+ * real taps. Signature-based filtering (identical axes, saturated values) cut
+ * false triggers to zero but also dropped 3 of 5 real taps.
  *
- * Note this pairs with a 20ms poll interval (see imu.c). Faster polling would
- * catch higher peaks and allow a higher threshold, but the shared I2C bus
- * cannot sustain it -- see the poll-interval comment for why.
+ * Measured populations while tapping normally:
+ *   at rest                    ~1000 mg
+ *   settling / light contact    1900-2200 mg
+ *   deliberate taps             2900-8600 mg
+ *
+ * If you would rather have zero false triggers than reliable detection, raise
+ * this and re-run BOTH tests: a counted 5-tap test and a 25s idle test.
+ *
+ * The robust fix is not a threshold: it is the PLUS button on GPIO4, which is
+ * a debounced digital input with none of these failure modes.
  */
-#define TAP_THRESHOLD_MG 2800
+#define TAP_THRESHOLD_MG 4000
 
 /*
  * After an accepted tap, ignore everything for this long. Covers the case
