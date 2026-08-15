@@ -1,0 +1,92 @@
+# Stripe Revenue Display
+
+Firmware for a single-purpose desk instrument that shows live Stripe revenue
+metrics on a 1.54" 240x240 LCD. It answers one question at a time, in numbers
+readable across a room, and talks to nothing except the Stripe API.
+
+Not affiliated with Stripe.
+
+## Status
+
+Stage 1 of 8 complete: display bring-up. The three-zone layout renders on
+hardware with the real palette and typeface. No networking yet.
+
+See [firmware-build-plan.md](firmware-build-plan.md) for the staged plan and
+progress, and [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md)
+for the design specification this is built from.
+
+## Hardware
+
+Waveshare ESP32-S3-LCD-1.54 (non-touch): ESP32-S3R8, 8MB PSRAM, 16MB flash,
+ST7789 240x240 IPS panel over SPI at 40MHz.
+
+Pin assignments are in [firmware/main/board_config.h](firmware/main/board_config.h),
+taken from Waveshare's own ESP-IDF example for this board.
+
+## Building
+
+Requires ESP-IDF 5.4 or newer (developed against 5.5.1).
+
+```sh
+. $IDF_PATH/export.sh
+cd firmware
+idf.py set-target esp32s3
+idf.py build
+idf.py -p /dev/cu.usbmodem<N> flash monitor
+```
+
+## Tests
+
+Sizing and layout logic is pure arithmetic with no ESP-IDF dependency, so it
+runs on the host:
+
+```sh
+cd firmware/test
+make
+```
+
+## Regenerating fonts
+
+The LVGL bitmap fonts in `firmware/main/fonts/` are generated from the vendored
+Roboto Condensed TTF. Regenerate them with:
+
+```sh
+cd firmware
+./tools/gen_fonts.sh          # needs npx (lv_font_conv)
+```
+
+If you change the face or weight, you **must** also regenerate the glyph
+advance table in `main/hero_size.c`:
+
+```sh
+./tools/dump_advances.py      # needs Pillow
+```
+
+Otherwise text sizing will silently disagree with what LVGL actually renders.
+
+## Notable deviations from the spec
+
+Three findings from bringing this up on real hardware contradict the written
+spec. All are documented with reasoning in
+[firmware-build-plan.md](firmware-build-plan.md):
+
+1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** This panel's
+   response is nearly a step function at the bottom: `0x00` is truly black,
+   but `0x04` has already jumped to visible gray, and `0x04`-`0x30` collapse
+   together. `#121211` renders mid-gray. `main/colortest.c` reproduces the
+   measurement.
+
+2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace spends
+   a full character cell on `.`, shrinking digits enough to hurt legibility at
+   50cm. Roboto Condensed renders `$6.5k` at 88px where monospace managed 64px.
+   It also has tabular figures, so it keeps the anti-jitter property that
+   motivated the monospace rule in the first place.
+
+3. **Full-buffer JSON parsing is probably viable (spec 8.3).** The spec assumes
+   ~320KB of heap and mandates streaming parses; this board reports 8MB PSRAM.
+   To be confirmed at Stage 5.
+
+## License
+
+Roboto Condensed is used under the SIL Open Font License; see
+[firmware/tools/fonts/LICENSE-RobotoCondensed.txt](firmware/tools/fonts/LICENSE-RobotoCondensed.txt).
