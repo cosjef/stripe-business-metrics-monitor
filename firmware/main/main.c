@@ -1,18 +1,25 @@
 /*
- * Stripe Revenue Display -- Stage 2.
+ * Stripe Revenue Display -- Stage 3.
  *
- * Rotates through the six metric screens (spec 6.1) on an 8-second timer,
- * driven by hardcoded fixture data. No networking yet; Stage 4 replaces the
- * fixtures with live Stripe values.
+ * On first boot the device has no WiFi credentials, so it runs setup mode: an
+ * open "Setup-XXXX" AP with a captive portal (spec 9.1), showing State C on
+ * screen. Once provisioned it joins the network and rotates through the six
+ * metric screens (spec 6.1) on an 8-second timer.
+ *
+ * Metric values are still hardcoded fixtures; Stage 4 replaces them with live
+ * Stripe data.
  *
  * All drawing lives in screens.c, which depends only on LVGL and is covered by
  * pixel tests in the host harness (firmware/test/test_screens.c). This file
  * owns hardware bring-up and the rotation timer only.
  *
- * Known Stage 2 limitations, tracked in firmware-build-plan.md:
+ * Known Stage 3 limitations, tracked in firmware-build-plan.md:
  *   - No partial-window updates (spec 5.3); LVGL redraws as it sees fit.
- *   - Fixture data, so no stale/auth states are reachable at runtime yet --
- *     those screens exist and are tested, but nothing triggers them.
+ *   - The portal collects WiFi only. The Stripe key and preferences come in
+ *     Stage 4, where the key can be validated the moment it is entered
+ *     (spec 9.1 step 4) rather than stored untested.
+ *   - Stale and auth-error states are unreachable at runtime: those screens
+ *     exist and are pixel-tested, but no live data yet triggers them.
  */
 #include "display.h"
 #include "board_config.h"
@@ -20,13 +27,22 @@
 #include "hero_size.h"
 #include "screens.h"
 #include "imu.h"
+#include "settings.h"
+#include "wifi.h"
+#include "portal.h"
 #include "colortest.h"
 
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_system.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "main";
+
+/* Shown in the setup screen footer, for support (spec 6.2 State C). */
+#define FIRMWARE_VERSION "v0.3.0"
 
 /* Set to 1 to draw the color diagnostic instead of the rotation. */
 #define COLORTEST_ENABLED 0
@@ -115,17 +131,56 @@ static void on_double_tap(void)
     }
 }
 
-void app_main(void)
-{
-    ESP_ERROR_CHECK(display_init());
+/* Setup mode: show State C and run the portal until credentials arrive. */
+static char s_setup_ssid[SETUP_SSID_LEN];
 
-#if COLORTEST_ENABLED
+static void show_setup_screen(void)
+{
     lvgl_port_lock(0);
-    colortest_draw();
+    screen_draw_setup(lv_screen_active(), "Join wifi", s_setup_ssid,
+                      "then open browser", FIRMWARE_VERSION);
     lvgl_port_unlock();
-    ESP_LOGI(TAG, "color test rendered");
-    return;
-#endif
+    ESP_LOGI(TAG, "setup mode: join \"%s\"", s_setup_ssid);
+}
+
+static void on_credentials(const char *ssid, const char *pass)
+{
+    ESP_LOGI(TAG, "credentials received for \"%s\"", ssid);
+
+    if (settings_set_wifi(ssid, pass) != ESP_OK) {
+        ESP_LOGE(TAG, "failed to store credentials");
+        return;
+    }
+
+    /* Restart rather than tearing down the AP and portal in place. A reboot
+     * from a known state is far less error-prone than unwinding softAP,
+     * the HTTP server, and the DNS task while a client is still associated. */
+    ESP_LOGI(TAG, "restarting to join the network");
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    esp_restart();
+}
+
+static void run_setup_mode(void)
+{
+    ESP_ERROR_CHECK(wifi_init());
+    ESP_ERROR_CHECK(wifi_start_ap(s_setup_ssid, sizeof(s_setup_ssid)));
+    ESP_ERROR_CHECK(portal_start(on_credentials));
+    show_setup_screen();
+}
+
+static void run_normal_mode(void)
+{
+    char ssid[WIFI_SSID_MAX_LEN + 1] = "";
+    char pass[WIFI_PASS_MAX_LEN + 1] = "";
+
+    if (settings_get_wifi(ssid, sizeof(ssid), pass, sizeof(pass)) != ESP_OK) {
+        ESP_LOGW(TAG, "stored credentials unreadable; entering setup");
+        run_setup_mode();
+        return;
+    }
+
+    ESP_ERROR_CHECK(wifi_init());
+    ESP_ERROR_CHECK(wifi_start_sta(ssid, pass));
 
     show_current("boot");
 
@@ -140,12 +195,33 @@ void app_main(void)
     ESP_LOGI(TAG, "rotating %d screens every %dms",
              ROTATION_COUNT, ROTATION_INTERVAL_MS);
 
-    /* Double-tap navigation. The board has no touch controller, so the IMU is
-     * how a user skips ahead without waiting out the interval. A failure here
-     * is not fatal -- the device still rotates on its own. */
+    /* Tap-to-advance. A failure here is not fatal -- the device still
+     * rotates on its own. */
     if (imu_init() == ESP_OK) {
         ESP_ERROR_CHECK(imu_start_tap_watch(on_double_tap));
     } else {
         ESP_LOGW(TAG, "IMU unavailable; rotation is timer-only");
     }
+}
+
+void app_main(void)
+{
+    ESP_ERROR_CHECK(display_init());
+    ESP_ERROR_CHECK(settings_init());
+
+#if COLORTEST_ENABLED
+    lvgl_port_lock(0);
+    colortest_draw();
+    lvgl_port_unlock();
+    ESP_LOGI(TAG, "color test rendered");
+    return;
+#endif
+
+    /* Setup mode until the customer has provisioned WiFi (spec 9.1). */
+    if (!settings_have_wifi()) {
+        run_setup_mode();
+        return;
+    }
+
+    run_normal_mode();
 }
