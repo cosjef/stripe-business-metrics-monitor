@@ -27,11 +27,25 @@
 /*
  * Acceleration magnitude, in milli-g, that counts as a deliberate tap.
  *
- * Chosen from measurement: deliberate taps landed at 6000-10433 mg, while case
- * ringing and incidental knocks clustered at 1450-2700 mg. 4000 sits cleanly
- * between the two populations.
+ * Chosen from measurement, and revised once. An initial 4000 mg was set from a
+ * capture where taps read 6000-10433 mg -- but that capture was of deliberately
+ * firm taps. Measuring NORMAL tapping showed real taps landing as low as 3806
+ * and 3998 mg, i.e. straddling the threshold, so roughly half were rejected and
+ * the device felt like it needed several taps to respond.
+ *
+ * Populations measured while tapping normally:
+ *   at rest              ~1000 mg
+ *   incidental knocks     1631-1999 mg
+ *   real taps             3806-9850 mg
+ *
+ * 2800 sits above the knock population with margin, and comfortably below the
+ * softest real tap.
+ *
+ * Note this pairs with a 20ms poll interval (see imu.c). Faster polling would
+ * catch higher peaks and allow a higher threshold, but the shared I2C bus
+ * cannot sustain it -- see the poll-interval comment for why.
  */
-#define TAP_THRESHOLD_MG 4000
+#define TAP_THRESHOLD_MG 2800
 
 /*
  * After an accepted tap, ignore everything for this long. Covers the case

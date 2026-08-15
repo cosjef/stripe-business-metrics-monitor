@@ -26,9 +26,17 @@ static const char *TAG = "imu";
 #define REG_CTRL7    0x08
 #define REG_AX_L     0x35
 
-/* Poll fast enough to catch the short spike a tap produces. A tap lasts only
- * a few tens of milliseconds, so 100Hz would miss most of them. */
-#define POLL_INTERVAL_MS 10
+/*
+ * Poll interval.
+ *
+ * Faster sampling catches the peak of a tap impulse more reliably, but this
+ * bus is shared with the audio codecs and is evidently marginal: at 5-8ms the
+ * NACK rate climbed sharply and the task starved CPU 0's idle task badly
+ * enough to trip the task watchdog. 20ms is well within FreeRTOS's 10ms tick
+ * so the task yields cleanly, and the threshold was lowered to compensate for
+ * sampling the impulse tail rather than its peak.
+ */
+#define POLL_INTERVAL_MS 20
 
 static i2c_master_bus_handle_t s_bus = NULL;
 static i2c_master_dev_handle_t s_dev = NULL;
@@ -69,8 +77,22 @@ esp_err_t imu_init(void)
     ESP_RETURN_ON_ERROR(i2c_master_bus_add_device(s_bus, &dev_cfg, &s_dev),
                         TAG, "i2c device failed");
 
+    /* The QMI8658 needs a moment after power-up before it answers, and the bus
+     * can still be settling when we get here right after display bring-up.
+     * A single read at this point NACKs intermittently, which left the tap
+     * task unstarted and navigation silently dead. Retry rather than give up
+     * on the first failure. */
     uint8_t id = 0;
-    ESP_RETURN_ON_ERROR(reg_read(REG_WHO_AM_I, &id, 1), TAG, "WHO_AM_I read failed");
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 10; attempt++) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        err = reg_read(REG_WHO_AM_I, &id, 1);
+        if (err == ESP_OK && id == QMI_WHO_AM_I) {
+            break;
+        }
+    }
+
+    ESP_RETURN_ON_ERROR(err, TAG, "WHO_AM_I read failed after retries");
     ESP_RETURN_ON_FALSE(id == QMI_WHO_AM_I, ESP_ERR_NOT_FOUND, TAG,
                         "unexpected WHO_AM_I 0x%02X at 0x%02X", id, QMI_ADDR);
 
@@ -85,6 +107,12 @@ esp_err_t imu_init(void)
     ESP_RETURN_ON_ERROR(reg_write(REG_CTRL2, 0x24), TAG, "CTRL2 failed");
     ESP_RETURN_ON_ERROR(reg_write(REG_CTRL7, 0x01), TAG, "CTRL7 failed");
     vTaskDelay(pdMS_TO_TICKS(50));
+
+    /* Silence the I2C driver's own per-failure logging. This bus is shared and
+     * marginal, so occasional NACKs are expected; at error level they flooded
+     * the console and burned enough CPU to contribute to a watchdog trip. Our
+     * periodic health line reports the drop rate instead. */
+    esp_log_level_set("i2c.master", ESP_LOG_NONE);
 
     ESP_LOGI(TAG, "QMI8658 ready at 0x%02X (rev 0x%02X)", QMI_ADDR, rev);
     return ESP_OK;

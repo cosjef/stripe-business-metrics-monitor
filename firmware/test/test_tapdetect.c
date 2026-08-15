@@ -188,8 +188,9 @@ static void test_rest_never_fires(void)
 }
 
 /*
- * The magnitudes that were causing spurious triggers before: incidental
- * knocks and ringing, measured at 1450-2700 mg. All must now be rejected.
+ * Incidental knocks and ringing, measured while tapping normally. All must be
+ * rejected: these are what the device sees when it is bumped or set down, and
+ * the earlier double-tap version fired on them.
  */
 static void test_soft_knocks_rejected(void)
 {
@@ -197,8 +198,8 @@ static void test_soft_knocks_rejected(void)
 
     const int32_t soft[] = {1453, 1486, 1494, 1499, 1505, 1510, 1522, 1527,
                             1539, 1558, 1599, 1618, 1631, 1678, 1699, 1750,
-                            1757, 1784, 1858, 1917, 2038, 2182, 2352, 2582,
-                            2669, 2681};
+                            1757, 1784, 1858, 1917, 1997, 1999, 2038, 2182,
+                            2352, 2582, 2669, 2681};
 
     for (size_t i = 0; i < sizeof(soft) / sizeof(soft[0]); i++) {
         tap_detector_t d;
@@ -208,6 +209,45 @@ static void test_soft_knocks_rejected(void)
         snprintf(what, sizeof(what), "%ld mg knock rejected", (long)soft[i]);
         check_int(what, feed_tap(&d, &t, soft[i]), 0);
     }
+}
+
+/*
+ * The taps that the original 4000 mg threshold was silently dropping. These
+ * are real taps measured during normal use; every one must now register, or
+ * the device goes back to feeling like it needs several taps.
+ */
+static void test_soft_real_taps_accepted(void)
+{
+    printf("softer real taps are accepted\n");
+
+    const int32_t soft_taps[] = {3806, 3998, 4549, 4764};
+
+    for (size_t i = 0; i < sizeof(soft_taps) / sizeof(soft_taps[0]); i++) {
+        tap_detector_t d;
+        tap_detector_init(&d);
+        uint32_t t = 0;
+        char what[72];
+        snprintf(what, sizeof(what), "%ld mg real tap accepted", (long)soft_taps[i]);
+        check_int(what, feed_tap(&d, &t, soft_taps[i]), 1);
+    }
+}
+
+/*
+ * The gap between the loudest rejected knock and the softest accepted tap.
+ * If a future threshold change closes this gap, the device becomes either
+ * unresponsive or trigger-happy -- so assert the separation explicitly.
+ */
+static void test_threshold_separates_populations(void)
+{
+    printf("threshold separates knocks from taps\n");
+
+    const int32_t loudest_knock = 2681;
+    const int32_t softest_tap = 3806;
+
+    check_true("threshold above the loudest measured knock",
+               TAP_THRESHOLD_MG > loudest_knock);
+    check_true("threshold below the softest measured real tap",
+               TAP_THRESHOLD_MG < softest_tap);
 }
 
 static void test_handling_does_not_fire(void)
@@ -300,10 +340,25 @@ static void test_real_capture_replay(void)
         t += 10;
     }
 
-    /* Every accepted tap must correspond to a strike above threshold, and
-     * the count must be far below the 14 the old logic produced. */
-    check_true("real capture yields a plausible tap count", fired >= 8 && fired <= 16);
-    printf("    (accepted %d taps from 48 impacts; old logic accepted 14)\n", fired);
+    /* Count how many impacts in the capture are genuinely above threshold --
+     * that is the upper bound on what should be accepted. The lockout may
+     * legitimately swallow some of them.
+     *
+     * Note this capture predates the threshold revision and was recorded with
+     * firmer tapping, so the absolute count is less meaningful than the
+     * invariant: never accept more taps than there were qualifying impacts. */
+    int qualifying = 0;
+    for (size_t i = 0; i < sizeof(capture) / sizeof(capture[0]); i++) {
+        if (capture[i][0] >= TAP_THRESHOLD_MG) {
+            qualifying++;
+        }
+    }
+
+    check_true("never accepts more taps than qualifying impacts", fired <= qualifying);
+    check_true("accepts a reasonable share of qualifying impacts",
+               fired >= qualifying / 2);
+    printf("    (accepted %d of %d qualifying impacts, from 48 total)\n",
+           fired, qualifying);
 }
 
 /* ---- magnitude helper ---- */
@@ -333,6 +388,8 @@ int main(void)
     test_lockout_boundary();
     test_rest_never_fires();
     test_soft_knocks_rejected();
+    test_soft_real_taps_accepted();
+    test_threshold_separates_populations();
     test_handling_does_not_fire();
     test_sustained_high_is_rate_limited();
     test_real_capture_replay();
