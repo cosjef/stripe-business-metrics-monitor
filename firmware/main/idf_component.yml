@@ -1,0 +1,7 @@
+dependencies:
+  idf: '>=5.4'
+  espressif/esp_lvgl_port: ^2.6.0
+  lvgl/lvgl: ^9.3.0
+# Note: Waveshare's non-touch demo also lists espressif/esp_lcd_touch_cst816s,
+# but that is the touch variant's dependency and our board has no touch
+# controller. Deliberately omitted.
