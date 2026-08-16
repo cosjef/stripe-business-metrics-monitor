@@ -26,7 +26,6 @@
 #include "layout.h"
 #include "hero_size.h"
 #include "screens.h"
-#include "imu.h"
 #include "settings.h"
 #include "wifi.h"
 #include "portal.h"
@@ -305,21 +304,6 @@ static void rotate_cb(void *arg)
     advance("timer");
 }
 
-/*
- * A double tap advances immediately and restarts the rotation timer, so the
- * screen you asked for gets a full interval before it moves on. Rotation is
- * never suspended -- the device is an appliance, and one left showing a single
- * metric would stop being one (spec 1).
- */
-static void on_double_tap(void)
-{
-    advance("tap");
-
-    if (s_rotation_timer) {
-        esp_timer_stop(s_rotation_timer);
-        esp_timer_start_periodic(s_rotation_timer, ROTATION_INTERVAL_MS * 1000);
-    }
-}
 
 /* Setup mode: show State C and run the portal until credentials arrive. */
 static char s_setup_ssid[SETUP_SSID_LEN];
@@ -636,13 +620,24 @@ static void run_normal_mode(void)
     ESP_LOGI(TAG, "rotating %d screens every %dms",
              s_visible_count, ROTATION_INTERVAL_MS);
 
-    /* Tap-to-advance. A failure here is not fatal -- the device still
-     * rotates on its own. */
-    if (imu_init() == ESP_OK) {
-        ESP_ERROR_CHECK(imu_start_tap_watch(on_double_tap));
-    } else {
-        ESP_LOGW(TAG, "IMU unavailable; rotation is timer-only");
-    }
+    /*
+     * Tap navigation is DISABLED.
+     *
+     * It worked, but not cleanly: this board's I2C bus intermittently returns
+     * corrupt reads that decode as large single-sample accelerations, and a
+     * real tap also lands in exactly one 20ms sample -- the bus cannot be
+     * polled faster without tripping the task watchdog. Every filter that
+     * removed the false triggers also rejected real taps.
+     *
+     * Measured on hardware: 8 phantom advances in 60 seconds while the device
+     * sat untouched. A rotation that jumps on its own is worse than one that
+     * cannot be skipped, and spec 1 principle 3 asked for no interaction in
+     * the first place.
+     *
+     * The IMU code, its tests, and the tuning history are retained. The
+     * robust fix if this is ever wanted again is the PLUS button on GPIO4 --
+     * a debounced digital input with none of these failure modes.
+     */
 
     /* Load the stored key and start fetching real data. */
     char key[STRIPE_KEY_MAX_LEN + 1] = "";
