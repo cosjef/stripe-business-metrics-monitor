@@ -12,6 +12,7 @@ static const char *TAG = "settings";
 #define KEY_WIFI_SSID "wifi_ssid"
 #define KEY_WIFI_PASS "wifi_pass"
 #define KEY_STRIPE     "stripe_key"
+#define KEY_CACHE      "last_good"
 
 esp_err_t settings_init(void)
 {
@@ -178,4 +179,63 @@ esp_err_t settings_set_stripe_key(const char *key)
     }
 
     return err;
+}
+
+esp_err_t settings_save_cache(const cache_t *c)
+{
+    if (c == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* One blob, one commit: a partial write cannot leave MRR from this fetch
+     * beside a subscriber count from the last one. */
+    err = nvs_set_blob(h, KEY_CACHE, c, sizeof(*c));
+    if (err == ESP_OK) {
+        err = nvs_commit(h);
+    }
+    nvs_close(h);
+
+    return err;
+}
+
+esp_err_t settings_load_cache(cache_t *out)
+{
+    if (out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    size_t len = sizeof(*out);
+    err = nvs_get_blob(h, KEY_CACHE, out, &len);
+    nvs_close(h);
+
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* A blob of the wrong size is from different firmware. Treat it as absent
+     * rather than reading it into a struct it does not match. */
+    if (len != sizeof(*out)) {
+        ESP_LOGW(TAG, "cache size mismatch (%u vs %u); ignoring",
+                 (unsigned)len, (unsigned)sizeof(*out));
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+
+    if (!cache_is_valid(out)) {
+        ESP_LOGW(TAG, "cached values failed validation; ignoring");
+        return ESP_ERR_NVS_NOT_FOUND;
+    }
+
+    return ESP_OK;
 }

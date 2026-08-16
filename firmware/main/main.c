@@ -27,6 +27,7 @@
 #include "hero_size.h"
 #include "screens.h"
 #include "settings.h"
+#include "cache.h"
 #include "wifi.h"
 #include "portal.h"
 #include "stripe_key.h"
@@ -54,6 +55,13 @@ static const char *TAG = "main";
 
 /* Set to 1 to draw the color diagnostic instead of the rotation. */
 #define COLORTEST_ENABLED 0
+
+/*
+ * TEMPORARY: force the stale screen after this many seconds, to verify State A
+ * renders on hardware without waiting out the real 15-minute threshold.
+ * Set to 0 for normal behaviour.
+ */
+#define FORCE_STALE_AFTER_S 0
 
 /*
  * Screen contents, refreshed from Stripe (spec 7.1, 7.2).
@@ -85,7 +93,7 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
     [SCREEN_TRIALS]     = { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CANCELLATIONS] = { .label = "CANCELLED", .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    [SCREEN_ARR]        = { .label = "ARR",        .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_ARR]        = { .label = "ANNUAL RUN RATE", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_ARPU]       = { .label = "ARPU",       .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_NET_CHANGE] = { .label = "NET 30D",    .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_FAILED]     = { .label = "FAILED",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
@@ -99,6 +107,12 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
 static screen_id_t s_visible[SCREEN_COUNT];
 static int s_visible_count = 1;
 static rotation_state_t s_rot_state = {0};
+
+/* Kept so a refresh can be written to flash without re-deriving it. */
+static mrr_totals_t s_last_totals = {0};
+static int s_last_new_paid_30d = 0;
+static int s_last_new_paid_today = 0;
+static int64_t s_last_failed_cents = 0;
 
 static void rebuild_rotation(void)
 {
@@ -124,6 +138,94 @@ static void rebuild_rotation(void)
 /* Until the first fetch lands, show dashes rather than invented numbers.
  * Spec 1 principle 4: the device never lies, and a plausible-looking zero
  * would be a lie about an account that has not been read yet. */
+/*
+ * Render whatever was last seen, so a restart does not blank the screen
+ * (spec 7.4 step 1).
+ *
+ * The values are shown with their real age behind them: freshness is seeded
+ * from the cache timestamp, so if the data is over fifteen minutes old the
+ * stale screen takes over immediately rather than presenting an hour-old
+ * figure as current.
+ */
+static bool restore_cache(void)
+{
+    cache_t c;
+    if (settings_load_cache(&c) != ESP_OK) {
+        return false;
+    }
+
+    const int64_t now = time(NULL);
+
+    /* Before NTP the clock is wrong, so the age cannot be judged. Showing the
+     * values anyway is fine -- they will be marked stale until proven fresh. */
+    if (now > 1700000000 && cache_too_old(&c, now)) {
+        ESP_LOGI(TAG, "cached values too old to show");
+        return false;
+    }
+
+    format_money_compact(c.mrr_cents, s_values[SCREEN_MRR].hero, FIELD_LEN);
+    format_money_compact(mrr_arr_cents(c.mrr_cents),
+                         s_values[SCREEN_ARR].hero, FIELD_LEN);
+    s_values[SCREEN_ARR].subtitle[0] = '\0';
+    format_money_compact(mrr_arpu_cents(c.mrr_cents, c.active_count),
+                         s_values[SCREEN_ARPU].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_ARPU].subtitle, FIELD_LEN, "avg per subscriber");
+
+    format_count(c.active_count, s_values[SCREEN_PAID_SUBS].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_PAID_SUBS].subtitle, FIELD_LEN, "active");
+
+    format_count(c.churned_30d, s_values[SCREEN_CANCELLATIONS].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_CANCELLATIONS].subtitle, FIELD_LEN, "last 30 days");
+
+    format_count(c.new_paid_today, s_values[SCREEN_NEW_PAID].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_NEW_PAID].subtitle, FIELD_LEN, "today");
+
+    const int net = c.new_paid_30d - c.churned_30d;
+    snprintf(s_values[SCREEN_NET_CHANGE].hero, FIELD_LEN, "%s%d",
+             net > 0 ? "+" : "", net);
+    snprintf(s_values[SCREEN_NET_CHANGE].subtitle, FIELD_LEN, "subscribers");
+
+    if (c.have_invoices && c.failed_count > 0) {
+        format_money_compact(c.failed_cents, s_values[SCREEN_FAILED].hero,
+                             FIELD_LEN);
+        snprintf(s_values[SCREEN_FAILED].subtitle, FIELD_LEN,
+                 "%d payment%s, retrying", c.failed_count,
+                 c.failed_count == 1 ? "" : "s");
+    }
+
+    for (int i = 0; i < SCREEN_COUNT; i++) {
+        s_rotation[i].hero = s_values[i].hero;
+        s_rotation[i].subtitle = s_values[i].subtitle;
+    }
+
+    s_rot_state.have_data = true;
+    s_rot_state.trial_count = c.trial_count;
+    s_rot_state.churned_30d = c.churned_30d;
+    s_rot_state.have_invoices = c.have_invoices;
+    s_rot_state.failed_count = c.failed_count;
+    rebuild_rotation();
+
+    /*
+     * Seed freshness from when the cache was written, NOT from now. Marking
+     * restored data as fresh would present an hour-old figure as current --
+     * the confident lie spec 6.2 exists to prevent.
+     */
+    const int64_t age_s = cache_age_seconds(&c, now);
+    if (age_s >= 0) {
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        const int64_t age_ms = age_s * 1000;
+        freshness_mark_success(&s_freshness,
+                               now_ms > age_ms ? now_ms - age_ms : 1);
+        ESP_LOGI(TAG, "restored cached values from %llds ago", (long long)age_s);
+    } else {
+        /* Age unknown (clock not yet synced). Show the values but treat them
+         * as unproven until the first fetch lands. */
+        ESP_LOGI(TAG, "restored cached values, age unknown");
+    }
+
+    return true;
+}
+
 static void set_placeholders(void)
 {
     for (int i = 0; i < SCREEN_COUNT; i++) {
@@ -139,6 +241,7 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
 {
     s_rot_state.have_data = true;
     s_rot_state.trial_count = t->trial_count;
+    s_last_totals = *t;
 
     format_money_compact(t->mrr_cents, s_values[SCREEN_MRR].hero, FIELD_LEN);
     if (t->mixed_currency) {
@@ -159,7 +262,9 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
     /* Derived from MRR, so available the moment MRR is. */
     format_money_compact(mrr_arr_cents(t->mrr_cents),
                          s_values[SCREEN_ARR].hero, FIELD_LEN);
-    snprintf(s_values[SCREEN_ARR].subtitle, FIELD_LEN, "annual run rate");
+    /* No subtitle: the label says it in full, and repeating it would be the
+     * same duplication as "UNPAID / unpaid invoice". */
+    s_values[SCREEN_ARR].subtitle[0] = '\0';
 
     format_money_compact(mrr_arpu_cents(t->mrr_cents, t->active_count),
                          s_values[SCREEN_ARPU].hero, FIELD_LEN);
@@ -201,6 +306,8 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
 static void apply_events(const event_totals_t *e)
 {
     s_rot_state.churned_30d = e->churned_30d;
+    s_last_new_paid_30d = e->new_paid_30d;
+    s_last_new_paid_today = e->new_paid;
 
 
     /* MRR subtitle: today's realized movement. Green, because spec 4.2
@@ -289,7 +396,14 @@ static void show_current(const char *why)
      */
     const screen_id_t id = s_visible[s_index];
 
-    if (freshness_is_stale(&s_freshness, now_ms)) {
+    bool stale = freshness_is_stale(&s_freshness, now_ms);
+#if FORCE_STALE_AFTER_S
+    if (now_ms > FORCE_STALE_AFTER_S * 1000) {
+        stale = true;
+    }
+#endif
+
+    if (stale) {
         const int64_t age = freshness_age_ms(&s_freshness, now_ms);
 
         char age_str[24];
@@ -633,6 +747,7 @@ static void refresh_task(void *arg)
             if (fr == STRIPE_OK) {
                 s_rot_state.have_invoices = true;
                 s_rot_state.failed_count = failed_count;
+                s_last_failed_cents = failed_cents;
 
                 lvgl_port_lock(0);
                 format_money_compact(failed_cents,
@@ -655,6 +770,26 @@ static void refresh_task(void *arg)
         }
 
         if (any_success) {
+            /* Persist so the next boot has something to show immediately. */
+            cache_t c = {
+                .version = CACHE_VERSION,
+                .saved_at_utc = time(NULL),
+                .mrr_cents = s_last_totals.mrr_cents,
+                .active_count = s_last_totals.active_count,
+                .trial_count = s_last_totals.trial_count,
+                .churned_30d = s_rot_state.churned_30d,
+                .new_paid_30d = s_last_new_paid_30d,
+                .new_paid_today = s_last_new_paid_today,
+                .failed_count = s_rot_state.failed_count,
+                .failed_cents = s_last_failed_cents,
+                .have_invoices = s_rot_state.have_invoices,
+                .mixed_currency = s_last_totals.mixed_currency,
+                .has_tiered = s_last_totals.has_tiered,
+            };
+            if (c.saved_at_utc > 1700000000) {
+                settings_save_cache(&c);
+            }
+
             freshness_mark_success(&s_freshness, now_ms);
             show_current("refresh");
         } else {
@@ -683,7 +818,11 @@ static void run_normal_mode(void)
     ESP_ERROR_CHECK(wifi_start_sta(ssid, pass));
 
     freshness_init(&s_freshness);
-    set_placeholders();
+
+    /* Cached values first, dashes only if there are none (spec 7.4 step 1). */
+    if (!restore_cache()) {
+        set_placeholders();
+    }
     show_current("boot");
 
     const esp_timer_create_args_t timer_args = {

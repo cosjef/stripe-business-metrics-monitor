@@ -14,6 +14,7 @@
 
 #include "esp_err.h"
 #include "provision.h"
+#include "cache.h"
 #include "stripe_key.h"
 
 #include <stdbool.h>
@@ -59,3 +60,14 @@ esp_err_t settings_get_stripe_key(char *key, size_t key_len);
 
 /* Store a Stripe key. Should only be called after live validation. */
 esp_err_t settings_set_stripe_key(const char *key);
+
+/*
+ * Last-good values, so the screen is never blank on boot (spec 7.4 step 1).
+ *
+ * Stored as a blob rather than individual keys: one atomic write, and a
+ * partial update cannot leave the figures inconsistent with each other.
+ */
+esp_err_t settings_save_cache(const cache_t *c);
+
+/* Returns ESP_ERR_NVS_NOT_FOUND when nothing has been cached yet. */
+esp_err_t settings_load_cache(cache_t *out);
