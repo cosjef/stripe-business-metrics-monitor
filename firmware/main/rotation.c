@@ -46,6 +46,23 @@ bool rotation_screen_visible(screen_id_t id, const rotation_state_t *st)
          */
         return st->have_data;
 
+    case SCREEN_ARR:
+    case SCREEN_ARPU:
+        /* Both are arithmetic on MRR, so they are available whenever MRR is. */
+        return st->have_data;
+
+    case SCREEN_NET_CHANGE:
+        /* Net movement needs event history behind it. */
+        return st->have_data;
+
+    case SCREEN_FAILED:
+        /*
+         * Only when the key can read invoices and something is actually
+         * failing. Unlike cancellations, a permanent zero here is noise: no
+         * failed payments is the normal state, not news.
+         */
+        return st->have_data && st->have_invoices && st->failed_count > 0;
+
     case SCREEN_COUNT:
     default:
         return false;
@@ -62,10 +79,19 @@ int rotation_build(const rotation_state_t *st, screen_id_t *out)
      * changes. MRR leads as the anchor metric; churn sits next to the other
      * movement metrics rather than at the end. */
     static const screen_id_t order[] = {
+        /*
+         * Order: the headline first, then movement, then composition, then
+         * the conditional exceptions. Failed payments sits high because it is
+         * the only screen that is actionable rather than informational.
+         */
         SCREEN_MRR,
+        SCREEN_FAILED,
+        SCREEN_NET_CHANGE,
         SCREEN_NEW_PAID,
         SCREEN_CANCELLATIONS,
         SCREEN_PAID_SUBS,
+        SCREEN_ARPU,
+        SCREEN_ARR,
         SCREEN_TRIALS,
         SCREEN_CONVERSION,
     };

@@ -85,6 +85,10 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
     [SCREEN_TRIALS]     = { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CANCELLATIONS] = { .label = "CANCELLED", .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_ARR]        = { .label = "ARR",        .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_ARPU]       = { .label = "PER CUSTOMER", .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_NET_CHANGE] = { .label = "NET 30D",    .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_FAILED]     = { .label = "UNPAID",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
 };
 
 /*
@@ -152,6 +156,15 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
         s_values[SCREEN_MRR].subtitle[0] = '\0';
     }
 
+    /* Derived from MRR, so available the moment MRR is. */
+    format_money_compact(mrr_arr_cents(t->mrr_cents),
+                         s_values[SCREEN_ARR].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_ARR].subtitle, FIELD_LEN, "annual run rate");
+
+    format_money_compact(mrr_arpu_cents(t->mrr_cents, t->active_count),
+                         s_values[SCREEN_ARPU].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_ARPU].subtitle, FIELD_LEN, "per month");
+
     /* Today's deltas need the events endpoint, which lands with the polling
      * layer. Dashes rather than a fabricated zero. */
     snprintf(s_values[SCREEN_NEW_PAID].hero, FIELD_LEN, "--");
@@ -218,6 +231,29 @@ static void apply_events(const event_totals_t *e)
      */
     format_count(e->churned_30d, s_values[SCREEN_CANCELLATIONS].hero, FIELD_LEN);
     snprintf(s_values[SCREEN_CANCELLATIONS].subtitle, FIELD_LEN, "last 30 days");
+
+    /*
+     * Net subscriber movement over the window: gained minus lost.
+     *
+     * Deliberately a COUNT, not a dollar figure. Computing net MRR change
+     * would mean pricing each created and deleted subscription from its
+     * event payload, which is the same unreliable inference that keeps MRR
+     * off the incremental path (see events.h).
+     */
+    {
+        const int net = e->new_paid_30d - e->churned_30d;
+        char body[FORMAT_MONEY_LEN];
+        if (net > 0) {
+            snprintf(body, sizeof(body), "+%d", net);
+        } else {
+            snprintf(body, sizeof(body), "%d", net);
+        }
+        snprintf(s_values[SCREEN_NET_CHANGE].hero, FIELD_LEN, "%s", body);
+        snprintf(s_values[SCREEN_NET_CHANGE].subtitle, FIELD_LEN,
+                 "subs, last 30 days");
+        /* Green only for genuine growth (spec 4.2). */
+        s_rotation[SCREEN_NET_CHANGE].hero_is_gain = net > 0;
+    }
 
     for (int i = 0; i < SCREEN_COUNT; i++) {
         s_rotation[i].hero = s_values[i].hero;
@@ -574,6 +610,40 @@ static void refresh_task(void *arg)
                 apply_events(&ev);
                 lvgl_port_unlock();
                 any_success = true;
+            }
+        }
+
+        /*
+         * Failed payments. Needs Invoices: Read, which the setup instructions
+         * did not ask for -- an unauthorized response means the permission is
+         * missing, not that anything is wrong, so the screen simply stays
+         * hidden.
+         */
+        {
+            int failed_count = 0;
+            int64_t failed_cents = 0;
+            const stripe_result_t fr =
+                stripe_fetch_failed_payments(&failed_count, &failed_cents);
+
+            if (fr == STRIPE_OK) {
+                s_rot_state.have_invoices = true;
+                s_rot_state.failed_count = failed_count;
+
+                lvgl_port_lock(0);
+                format_money_compact(failed_cents,
+                                     s_values[SCREEN_FAILED].hero, FIELD_LEN);
+                snprintf(s_values[SCREEN_FAILED].subtitle, FIELD_LEN,
+                         "%d unpaid invoice%s", failed_count,
+                         failed_count == 1 ? "" : "s");
+                s_rotation[SCREEN_FAILED].hero = s_values[SCREEN_FAILED].hero;
+                s_rotation[SCREEN_FAILED].subtitle =
+                    s_values[SCREEN_FAILED].subtitle;
+                rebuild_rotation();
+                lvgl_port_unlock();
+
+                any_success = true;
+            } else if (fr == STRIPE_ERR_UNAUTHORIZED) {
+                s_rot_state.have_invoices = false;
             }
         }
 

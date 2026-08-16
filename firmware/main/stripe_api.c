@@ -448,3 +448,115 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
 
     return STRIPE_OK;
 }
+
+/*
+ * Open invoices are ones Stripe has issued but not collected. Past their due
+ * date with retries exhausted, they become uncollectible; both states are
+ * revenue at risk.
+ */
+#define INVOICES_BUF_LEN (128 * 1024)
+
+stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
+{
+    if (out_count) *out_count = 0;
+    if (out_cents) *out_cents = 0;
+
+    if (s_key[0] == '\0') {
+        return STRIPE_ERR_UNAUTHORIZED;
+    }
+
+    response_t resp = {
+        .buf = heap_caps_malloc(INVOICES_BUF_LEN, MALLOC_CAP_SPIRAM),
+        .len = 0,
+        .cap = INVOICES_BUF_LEN,
+    };
+    if (resp.buf == NULL) {
+        return STRIPE_ERR_NO_MEMORY;
+    }
+    resp.buf[0] = '\0';
+
+    const esp_http_client_config_t cfg = {
+        .url = "https://" STRIPE_HOST "/v1/invoices?status=open&limit=100",
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .event_handler = on_http_event,
+        .user_data = &resp,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == NULL) {
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_NO_MEMORY;
+    }
+
+    char auth[STRIPE_KEY_MAX_LEN + 16];
+    snprintf(auth, sizeof(auth), "Bearer %s", s_key);
+    esp_http_client_set_header(client, "Authorization", auth);
+
+    const esp_err_t err = esp_http_client_perform(client);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_NETWORK;
+    }
+
+    const int status = esp_http_client_get_status_code(client);
+    stripe_result_t result = classify_status(status);
+    esp_http_client_cleanup(client);
+
+    if (result != STRIPE_OK) {
+        /* A 401/403 here almost certainly means the key lacks Invoices: Read
+         * rather than that the whole key is bad -- the subscriptions call is
+         * working. Log it plainly so the cause is obvious. */
+        if (result == STRIPE_ERR_UNAUTHORIZED) {
+            ESP_LOGW(TAG, "invoices: HTTP %d -- key likely lacks Invoices: Read",
+                     status);
+        }
+        heap_caps_free(resp.buf);
+        return result;
+    }
+
+    cJSON *root = cJSON_Parse(resp.buf);
+    heap_caps_free(resp.buf);
+
+    if (root == NULL) {
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (!cJSON_IsArray(data)) {
+        cJSON_Delete(root);
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+
+    int count = 0;
+    int64_t cents = 0;
+
+    const cJSON *inv = NULL;
+    cJSON_ArrayForEach(inv, data) {
+        /* amount_due is what remains uncollected; amount_paid may be partial. */
+        const cJSON *due = cJSON_GetObjectItemCaseSensitive(inv, "amount_due");
+        const cJSON *paid = cJSON_GetObjectItemCaseSensitive(inv, "amount_paid");
+
+        const int64_t d = cJSON_IsNumber(due) ? (int64_t)due->valuedouble : 0;
+        const int64_t p = cJSON_IsNumber(paid) ? (int64_t)paid->valuedouble : 0;
+        const int64_t outstanding = d - p;
+
+        /* A zero-value open invoice is not revenue at risk. */
+        if (outstanding > 0) {
+            count++;
+            cents += outstanding;
+        }
+    }
+
+    cJSON_Delete(root);
+
+    if (out_count) *out_count = count;
+    if (out_cents) *out_cents = cents;
+
+    ESP_LOGI(TAG, "invoices: HTTP %d, %d unpaid worth %lld cents",
+             status, count, (long long)cents);
+
+    return STRIPE_OK;
+}

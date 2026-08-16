@@ -75,6 +75,21 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
                                           int64_t day_start_utc,
                                           event_totals_t *out);
 
+/*
+ * Count invoices that failed to collect, and what they are worth.
+ *
+ * Involuntary churn -- expired cards, declines -- is revenue being lost to
+ * nothing, and unlike a cancellation it is often recoverable. At a small
+ * subscriber count a single failure is a meaningful fraction of MRR.
+ *
+ * Requires **Invoices: Read** on the restricted key, which is a permission
+ * beyond the four the setup instructions asked for. Returns
+ * STRIPE_ERR_UNAUTHORIZED if the key lacks it, which the caller should treat
+ * as "unavailable" rather than as an error worth showing.
+ */
+stripe_result_t stripe_fetch_failed_payments(int *out_count,
+                                             int64_t *out_cents);
+
 /* Set the API key used for subsequent calls. Stored in RAM only. */
 void stripe_set_key(const char *key);
 

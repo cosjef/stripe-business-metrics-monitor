@@ -98,3 +98,27 @@ mrr_totals_t mrr_compute(const mrr_subscription_t *subs, int count);
 
 /* Parse a Stripe interval string ("month", "year", ...). */
 mrr_interval_t mrr_interval_from_str(const char *s);
+
+/*
+ * Annual run rate: monthly revenue projected over a year.
+ *
+ * A projection, not a measurement -- it assumes today's MRR holds for twelve
+ * months, which it will not. Shown because it is the figure most people quote
+ * for a subscription business, but it is arithmetic on MRR rather than new
+ * information.
+ */
+int64_t mrr_arr_cents(int64_t mrr_cents);
+
+/*
+ * Average revenue per paying customer.
+ *
+ * Returns 0 when there are no active subscriptions: an average over zero
+ * customers is undefined, and showing 0 is more honest than dividing by zero
+ * or inventing a number.
+ *
+ * Note this is per SUBSCRIPTION, not per customer -- one customer with two
+ * subscriptions counts twice. Stripe's subscription list does not tell us
+ * which belong to the same customer without expanding, and at typical
+ * one-subscription-per-customer accounts the distinction does not arise.
+ */
+int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count);

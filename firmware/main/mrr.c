@@ -138,3 +138,21 @@ mrr_totals_t mrr_compute(const mrr_subscription_t *subs, int count)
 
     return out;
 }
+
+int64_t mrr_arr_cents(int64_t mrr_cents)
+{
+    return mrr_cents * 12;
+}
+
+int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count)
+{
+    /* An average over zero customers is undefined. Returning 0 is honest;
+     * dividing would crash and inventing a figure would be worse. */
+    if (active_count <= 0) {
+        return 0;
+    }
+
+    /* Truncate rather than round: on a revenue display, understating
+     * per-customer value is the safer direction to err. */
+    return mrr_cents / active_count;
+}

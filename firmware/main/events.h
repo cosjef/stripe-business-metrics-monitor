@@ -54,6 +54,7 @@ typedef struct {
      * be watched as a trend, which is what makes it worth a permanent slot.
      */
     int churned_30d;
+    int new_paid_30d;     /* subscriptions created in the same window */
 
     bool have_last;           /* whether last_* below are populated */
     event_kind_t last_kind;

@@ -393,6 +393,42 @@ static void test_large_account_no_overflow(void)
     check_int("all active", r.active_count, 1000);
 }
 
+/* ---- derived metrics ---- */
+
+static void test_arr(void)
+{
+    printf("annual run rate\n");
+
+    check_i64("zero", mrr_arr_cents(0), 0);
+    check_i64("$941.33/mo -> $11,295.96/yr", mrr_arr_cents(94133), 1129596);
+    check_i64("$1000/mo", mrr_arr_cents(100000), 1200000);
+
+    /* Must not overflow on a large account: $10m/month is 1.2e9 cents/year,
+     * which needs more than 32 bits. */
+    check_i64("$10m/mo does not overflow",
+              mrr_arr_cents(1000000000LL), 12000000000LL);
+}
+
+static void test_arpu(void)
+{
+    printf("average revenue per subscription\n");
+
+    /* The real account: $941.33 over 28 subscriptions. */
+    check_i64("$941.33 / 28", mrr_arpu_cents(94133, 28), 3361);
+
+    check_i64("clean division", mrr_arpu_cents(100000, 10), 10000);
+
+    /* An average over no customers is undefined; 0 is the honest answer. */
+    check_i64("no customers", mrr_arpu_cents(94133, 0), 0);
+    check_i64("negative count", mrr_arpu_cents(94133, -1), 0);
+
+    check_i64("zero revenue", mrr_arpu_cents(0, 28), 0);
+
+    /* Truncation, not rounding: overstating per-customer revenue would be the
+     * wrong direction to err on a revenue display. */
+    check_i64("truncates rather than rounds up", mrr_arpu_cents(1099, 10), 109);
+}
+
 int main(void)
 {
     printf("MRR computation tests (spec 7.2)\n\n");
@@ -412,6 +448,8 @@ int main(void)
     test_mixed_realistic_account();
     test_empty_account();
     test_large_account_no_overflow();
+    test_arr();
+    test_arpu();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -95,8 +95,12 @@ event_totals_t events_summarize_window(const stripe_event_t *events, int count,
 
         /* Cancellations over the rolling window. Counted before the daily
          * filter, since the window is wider than a day. */
-        if (e->kind == EVENT_SUB_DELETED && e->created >= window_start_utc) {
-            t.churned_30d++;
+        if (e->created >= window_start_utc) {
+            if (e->kind == EVENT_SUB_DELETED) {
+                t.churned_30d++;
+            } else if (e->kind == EVENT_SUB_CREATED) {
+                t.new_paid_30d++;
+            }
         }
 
         /* Daily figures count only today, or "new paid today" would never

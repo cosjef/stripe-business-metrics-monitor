@@ -75,7 +75,7 @@ static void test_no_trials_drops_two_screens(void)
     check_true("paid subs present", contains(list, n, SCREEN_PAID_SUBS));
     check_true("cancellations present", contains(list, n, SCREEN_CANCELLATIONS));
 
-    check_int("four screens", n, 4);
+    check_int("seven screens", n, 7);
 }
 
 static void test_trials_appear_when_present(void)
@@ -193,7 +193,7 @@ static void test_full_account(void)
     screen_id_t list[SCREEN_COUNT];
     const int n = rotation_build(&st, list);
 
-    check_int("all six", n, 6);
+    check_int("nine without failed payments", n, 9);
 }
 
 /* Display order must be stable, so the rotation does not reshuffle. */
@@ -221,6 +221,46 @@ static void test_order_is_stable(void)
     check_int("MRR first", a[0], SCREEN_MRR);
 }
 
+/* Failed payments appear only when the key can read them and some exist. */
+static void test_failed_payments_conditional(void)
+{
+    printf("failed payments are conditional on permission and count\n");
+
+    rotation_state_t st = {
+        .have_data = true, .have_invoices = false, .failed_count = 0,
+    };
+
+    screen_id_t list[SCREEN_COUNT];
+    int n = rotation_build(&st, list);
+    check_false("hidden without permission", contains(list, n, SCREEN_FAILED));
+
+    st.have_invoices = true;
+    n = rotation_build(&st, list);
+    check_false("hidden at zero", contains(list, n, SCREEN_FAILED));
+
+    st.failed_count = 2;
+    n = rotation_build(&st, list);
+    check_true("shown when payments are failing", contains(list, n, SCREEN_FAILED));
+}
+
+/* ARR and ARPU ride on MRR being available. */
+static void test_derived_metrics_follow_mrr(void)
+{
+    printf("ARR and ARPU appear with the data\n");
+
+    rotation_state_t st = {0};
+    screen_id_t list[SCREEN_COUNT];
+
+    int n = rotation_build(&st, list);
+    check_false("no ARR before data", contains(list, n, SCREEN_ARR));
+    check_false("no ARPU before data", contains(list, n, SCREEN_ARPU));
+
+    st.have_data = true;
+    n = rotation_build(&st, list);
+    check_true("ARR with data", contains(list, n, SCREEN_ARR));
+    check_true("ARPU with data", contains(list, n, SCREEN_ARPU));
+}
+
 int main(void)
 {
     printf("conditional rotation tests (spec 6.1)\n\n");
@@ -233,6 +273,8 @@ int main(void)
     test_mrr_always_present();
     test_full_account();
     test_order_is_stable();
+    test_failed_payments_conditional();
+    test_derived_metrics_follow_mrr();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

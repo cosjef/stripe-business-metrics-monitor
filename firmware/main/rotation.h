@@ -25,6 +25,10 @@ typedef enum {
     SCREEN_TRIALS,
     SCREEN_CONVERSION,
     SCREEN_CANCELLATIONS,
+    SCREEN_ARR,
+    SCREEN_ARPU,
+    SCREEN_NET_CHANGE,
+    SCREEN_FAILED,
     SCREEN_COUNT
 } screen_id_t;
 
@@ -34,6 +38,14 @@ typedef struct {
     int trial_count;
     int churned_30d;      /* cancellations in the rolling window */
     bool have_conversion; /* 30 days of trial history exist */
+
+    /*
+     * Failed payments are only shown when the key can read invoices AND
+     * something is actually failing. A permanent zero would be noise, and a
+     * screen the key cannot populate would be a lie.
+     */
+    bool have_invoices;   /* the key has Invoices: Read */
+    int failed_count;
 } rotation_state_t;
 
 /*
