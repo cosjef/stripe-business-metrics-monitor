@@ -4,6 +4,29 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 
 ---
 
+## Status as of 2026-08-15
+
+**The device is finished and running on live Stripe data.** Stages 1-7 are complete. Stage 8 is skipped by decision, and everything else is parked.
+
+**Ten screens are defined; the deck shows however many currently have something to say** — conditional screens drop out, so the live count on this account is 7-8, not a fixed number. In rotation order, grouped by kind:
+
+| Group | Screens |
+|---|---|
+| Revenue | MRR, ANNUAL RUN RATE, ARPU |
+| Alert | FAILED *(only when a payment has actually failed)* |
+| Movement | NET 30D, NEW PAID, CANCELLED |
+| Composition | PAID SUBS, TRIALS *(hidden — no trials on this account)*, CONVERSION *(hidden)* |
+
+Each screen holds for 5 seconds, with manual advance on the leftmost button. Data refreshes fully every 10 minutes and incrementally every 60 seconds, survives reboots via flash cache, and degrades to a stale or auth-error screen rather than showing a confident wrong number.
+
+**Tests: 15 suites, 1,071 checks, 0 failures.** Host-side, rendering through real LVGL into an offscreen framebuffer, so screen output is asserted pixel by pixel rather than by eye.
+
+Three deviations from the spec are deliberate and documented below: the background is `#000000` (the panel physically cannot render `#121211`), the typeface is Roboto Condensed rather than monospace, and there is no touch input (the board has no touch controller — navigation is the physical button).
+
+One item in Stage 7 is genuinely incomplete: state transitions were each verified by hand on hardware but have no automated test.
+
+---
+
 ## Toolchain decisions
 
 | Area | Choice | Rationale |
@@ -179,8 +202,8 @@ Goal: self-contained subsystem, testable independent of Stripe connectivity.
 - [x] Store WiFi credentials in NVS
 - [x] Render State C screen (Setup) with live SSID and firmware version in footer
 - [x] **Full flow verified on hardware 2026-08-15**: portal auto-opened → credentials entered → validated → stored → restart → joined network → DHCP lease `192.168.68.67` → rotation resumed
-- [ ] Capture Stripe restricted-key input via the portal — **moved to Stage 4**, where the key can be validated the moment it is entered (§9.1 step 4) rather than stored untested
-- [ ] Capture preferences: timezone, currency, rotation contents, brightness schedule (§9.1 step 5) — deferred with the key
+- [x] Capture Stripe restricted-key input via the portal — moved to Stage 4 and **done there**: the key is validated the moment it is entered (§9.1 step 4) rather than stored untested
+- [ ] Capture preferences: timezone, currency, rotation contents, brightness schedule (§9.1 step 5) — **parked** (see Parked below). Timezone is currently hardcoded to `EST5EDT,M3.2.0/2,M11.1.0/2`
 
 ### Notes from bring-up
 
@@ -193,60 +216,82 @@ Goal: self-contained subsystem, testable independent of Stripe connectivity.
 
 Goal: prove connectivity to the Stripe API and validate the restricted key; State B (auth error) becomes real here.
 
-- [ ] Resolve open gap: pick TLS client approach for ESP-IDF
-- [ ] Implement `GET /v1/subscriptions?limit=1` validation call (§9.1 step 4)
-- [ ] On success: show live MRR on the setup screen before completing setup (the "converts skeptics" moment, §9.1 step 4)
-- [ ] On failure (401 or other): trigger State B (Auth Error), re-enter setup mode rather than silently failing
-- [ ] Render State B screen with plain-language message + error code in footer
+- [x] Resolve open gap: pick TLS client approach — `esp_http_client` with `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE`
+- [x] Implement `GET /v1/subscriptions?limit=1` validation call (§9.1 step 4) — `VALIDATE_URL`, `main/stripe_api.c:19`
+- [ ] On success: show live MRR on the setup screen before completing setup (the "converts skeptics" moment, §9.1 step 4) — **not done.** The key validates and the portal confirms success, but the setup screen never shows a live number before handoff. Cosmetic, and only visible during first-run setup
+- [x] On failure (401 or other): trigger State B (Auth Error), re-enter setup mode rather than silently failing
+- [x] Render State B screen with plain-language message + error code in footer — verified on hardware
 
 ## Stage 5: MRR computation engine
 
 Goal: standalone, unit-testable function against fixture JSON — no live API or display dependency yet.
 
-- [ ] Resolve open gap: pick JSON parsing approach (full-buffer vs. streaming filter) given confirmed 8MB PSRAM
-- [ ] Implement §7.2 algorithm: iterate subscriptions/items, skip non-recurring prices, convert interval (month/year/week/day) to monthly value
-- [ ] Apply discounts before summing (§7.2 step 1 / §10 checklist)
-- [ ] Exclude trials from MRR total, count separately for the Trials screen (§7.2 step 2)
-- [ ] Detect and flag tiered/metered pricing (`billing_scheme == "tiered"`) rather than silently miscomputing (§7.2 step 3)
-- [ ] Assert single-currency, handle/reject mixed-currency data (§7.2 step 4)
-- [ ] Unit test against fixture JSON covering: flat monthly, flat annual, discounted, trialing, tiered, mixed-currency cases
+- [x] Resolve open gap: JSON parsing — full-buffer cJSON in PSRAM, given the confirmed 8MB
+- [x] Implement §7.2 algorithm: iterate subscriptions/items, skip non-recurring prices, convert interval (month/year/week/day) to monthly value
+- [x] Apply discounts before summing (§7.2 step 1 / §10 checklist) — `mrr_apply_discount()`, handles both `percent_off` and `amount_off`
+- [x] Exclude trials from MRR total, count separately (§7.2 step 2) — `main/mrr.c:94`, "counted, never summed"
+- [x] Detect and flag tiered/metered pricing rather than silently miscomputing (§7.2 step 3) — `has_tiered` / `tiered_count`
+- [x] Assert single-currency, handle/reject mixed-currency data (§7.2 step 4) — `mixed_currency` flag; the device has no rate table, so it refuses rather than guessing
+- [x] Unit test against fixture JSON covering all cases — `test_mrr` (58 checks), `test_stripe_parse` (48 checks)
+- [x] **Verified against the live account**: computed MRR matched the Stripe dashboard at $941.33 across 28 subscriptions. Carried into fixtures as a regression constant (`test_mrr.c:416`), though the comparison itself was made by eye against the dashboard and is not reproducible from the repo
 
 ## Stage 6: Full polling layer
 
 Goal: hybrid polling strategy live, reliability requirements in place, State A (stale) becomes real.
 
-- [ ] Full recompute every 10 minutes, on boot, and on reconciliation trigger (§7.3)
-- [ ] Incremental update every 60s via `GET /v1/events?limit=10`, adjusting cached MRR on `customer.subscription.{created,updated,deleted}` (§7.3)
-- [ ] Populate Last Event screen from incremental event data
-- [ ] Hourly full reconciliation regardless of incremental state (§7.3, drift correction)
-- [ ] Persist last-good state to flash; render cached values immediately on boot, then refresh (§7.4 step 1)
-- [ ] Exponential backoff on failure: 60s, 120s, 240s, capped at 15 min (§7.4 step 3)
-- [ ] NTP sync with explicit local timezone offset (§7.4 step 4)
-- [ ] Stale threshold at 15 minutes triggers State A (§7.4 step 2)
-- [ ] Render State A screen: values dim to muted, age shown in amber, retry status in footer
+- [x] Full recompute every 10 minutes and on boot (§7.3) — `REFRESH_INTERVAL_MS`, `main/main.c:677`
+- [x] Incremental update every 60s via `GET /v1/events`, adjusting cached state (§7.3) — `EVENTS_INTERVAL_MS`, `main/main.c:678`
+- [x] ~~Populate Last Event screen from incremental event data~~ — screen **removed** by decision: it only ever read "changed", which is not worth 5 seconds of attention. Replaced by the CANCELLED screen
+- [x] ~~Hourly full reconciliation regardless of incremental state~~ — **skipped by decision.** The spec asks for a third cadence to correct incremental drift, but the 10-minute full recompute already rebuilds from scratch six times an hour, which subsumes it. A separate hourly pass would be redundant work against the API
+- [x] Persist last-good state to flash; render cached values immediately on boot (§7.4 step 1) — `main/cache.c`, with version checking and plausibility validation. Removed the ~12s blank period at boot
+- [x] Exponential backoff on failure: 60s, 120s, 240s, capped at 15 min (§7.4 step 3) — `freshness_retry_delay_ms()`, `main/freshness.c:56-62`
+- [x] NTP sync with explicit local timezone offset (§7.4 step 4)
+- [x] Stale threshold at 15 minutes triggers State A (§7.4 step 2)
+- [x] Render State A screen: values dim to muted, age shown in amber, retry status in footer — verified on hardware
 
 ## Stage 7: Screen rotation + integration
 
-Goal: tie polling → cached state → renderer into the full 8-second rotation loop across all screens.
+Goal: tie polling → cached state → renderer into the full rotation loop across all screens.
 
-- [ ] Rotation timer cycling all 6 metric screens every 8s, dots reflecting position (§6.1)
-- [ ] Conditional churn screen: only enters rotation when nonzero for the period (§6.1)
-- [ ] Full integration: live Stripe data flowing through polling → MRR engine → cached state → rendering, no hardcoded fixtures remaining
-- [ ] Verify state transitions (normal → stale → auth error → setup) all correctly interrupt/resume rotation
+- [x] Rotation timer with dots reflecting position (§6.1) — **10 screens defined at 5s**, against the spec's 6 at 8s. The deck grew (ARR, ARPU, CANCELLED, FAILED) and the interval was tuned down by eye: 8s → 6s → 5s. Screens are grouped by kind — revenue, alert, movement, composition (`main/rotation.c:81-114`). TRIALS and CONVERSION are defined but never shown on this account, which has no trials
+- [x] Conditional screens: only enter rotation when they have something to say (§6.1) — visibility rules in `rotation_build()` (`main/rotation.c:72`), driven from `rebuild_rotation()` (`main/main.c:146`)
+- [x] Full integration: live Stripe data flowing through polling → MRR engine → cached state → rendering, no hardcoded fixtures remaining
+- [x] Manual advance on the leftmost button (GPIO0) — added by request; not in the spec
+- [x] Accent color discipline (§4.2) — green for realized gains only, red on FAILED only
+- [ ] Verify state transitions (normal → stale → auth error → setup) all correctly interrupt/resume rotation — **partially done.** Stale and auth-error were each forced and confirmed on hardware via the `FORCE_STALE_AFTER_S` / `FORCE_AUTH_FAIL_AFTER_S` switches in `main.c`, but there is no automated test covering the transitions, and `test_rotation.c` does not exercise them
 
 ## Stage 8: Power management
 
 Goal: cosmetic/lifetime feature, bolted on once the rest is stable.
 
-- [ ] PWM night-dimming schedule (e.g. 20% brightness 10pm–7am) (§3.3)
-- [ ] Confirm dimming doesn't visually break legibility floor at reduced brightness
+**Skipped by decision.** Not wanted for a desk device that is off when the room is empty.
+
+- [ ] ~~PWM night-dimming schedule (e.g. 20% brightness 10pm–7am) (§3.3)~~
+- [ ] ~~Confirm dimming doesn't visually break legibility floor at reduced brightness~~
 
 ---
 
-## Commercial / non-firmware checklist (from spec §10, tracked here for completeness)
+## Parked
+
+Not blocking. Revisit only if this becomes a product rather than one desk device.
+
+### Would need doing before a second user
+
+- [ ] **Setup preferences via the portal** (§9.1 step 5) — timezone, currency, rotation contents. Timezone is hardcoded to `EST5EDT,M3.2.0/2,M11.1.0/2`, which is correct here and wrong everywhere else. This is the one parked item that is a genuine defect for anyone but the current owner
+- [ ] **NVS encryption** — currently unencrypted by deliberate decision (a read-only restricted key leaks a subscriber count, not the ability to move money). Needs flash encryption with an eFuse-burned key: irreversible, and it complicates development flashing
+
+### Performance polish
+
+- [ ] **Partial-window updates (§5.3)** — repaint only the ~240x110 middle block via ST7789 CASET/RASET instead of the full 240x240. The spec's case: 53KB/~11ms versus 115KB/~25ms, where 25ms can read as a visible flicker.
+
+  Low value here, and worth measuring before implementing. The spec itself says full redraws are fine on rotation transitions, where a wipe reads as intentional — and rotation is nearly all of what this device does. The optimization only helps in-place updates, which happen at most once a minute and usually change nothing on screen. LVGL also does its own dirty-region tracking, so some of this may already be happening.
+
+- [ ] Live MRR on the setup screen before completing setup (§9.1 step 4) — the "converts skeptics" moment; only ever seen during first-run setup
+
+### Commercial checklist (spec §10)
 
 - [ ] Printed permission card in box, with QR code to setup guide
-- [ ] Firmware source published
+- [ ] Firmware source published — the repo is currently **private**; this is a decision, not a task
 - [ ] "Not affiliated with Stripe" disclosure in listing
 - [ ] Key rotation reminder documented for the customer
 - [ ] MRR definition documented, one page, shipped in the box
