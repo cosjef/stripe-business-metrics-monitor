@@ -13,6 +13,10 @@ display_state_t display_state(const device_status_t *status)
         return DISPLAY_AUTH_ERROR;
     }
 
+    if (status->battery_warn) {
+        return DISPLAY_BATTERY;
+    }
+
     if (status->stale) {
         return DISPLAY_STALE;
     }

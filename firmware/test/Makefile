@@ -33,7 +33,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
 CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
@@ -109,3 +109,6 @@ test_cache: test_cache.c ../main/cache.c ../main/cache.h
 
 test_state: test_state.c ../main/state.c ../main/state.h
 	$(CC) $(CFLAGS) -o $@ test_state.c ../main/state.c
+
+test_battery: test_battery.c ../main/battery.c ../main/battery.h
+	$(CC) $(CFLAGS) -o $@ test_battery.c ../main/battery.c

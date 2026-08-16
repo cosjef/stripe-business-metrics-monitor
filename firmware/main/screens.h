@@ -60,3 +60,19 @@ void screen_draw_auth_error(lv_obj_t *scr, const char *line1, const char *line2,
  */
 void screen_draw_setup(lv_obj_t *scr, const char *line1, const char *ssid,
                        const char *hint, const char *version);
+
+/*
+ * Low battery. Not in the original spec -- added once the device gained a
+ * lithium cell.
+ *
+ * Follows the auth-error shape rather than the rotation shape: it is a takeover
+ * screen with one thing to say, not a metric. The percentage is the hero
+ * because it is the number the owner acts on; the voltage sits in the footer
+ * for support, the same place the auth error puts its error code.
+ *
+ * `critical` switches the accent from amber to red: amber is the degraded
+ * state (still running, plug it in soon), red is the threshold breach (minutes
+ * left), matching how the deck already uses those two colors.
+ */
+void screen_draw_battery(lv_obj_t *scr, const char *pct, const char *line,
+                         const char *voltage, _Bool critical);

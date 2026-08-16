@@ -14,15 +14,17 @@
 typedef struct {
     _Bool provisioned;  /* WiFi credentials and a Stripe key are both stored */
     _Bool auth_failed;  /* Stripe rejected the key (401/403) */
+    _Bool battery_warn; /* running on battery and low enough to act on */
     _Bool stale;        /* last successful poll is older than the threshold */
 } device_status_t;
 
 /*
- * The four screens, in precedence order: earlier members outrank later ones.
+ * The five screens, in precedence order: earlier members outrank later ones.
  */
 typedef enum {
     DISPLAY_SETUP = 0,   /* State C -- nothing works until the owner acts */
     DISPLAY_AUTH_ERROR,  /* State B -- there will be no more numbers */
+    DISPLAY_BATTERY,     /* running out of power, and it will only get worse */
     DISPLAY_STALE,       /* State A -- these numbers are old */
     DISPLAY_ROTATION,    /* normal -- live metrics */
 } display_state_t;
@@ -42,6 +44,11 @@ typedef enum {
  *               threshold, so the two nearly always appear together -- and
  *               surfacing stale would send the owner to debug their network
  *               instead of re-issuing the key.
+ *
+ *   battery     Below auth error: a rejected key outlives any battery state,
+ *               and re-issuing it is unrelated to power. Above stale: a dying
+ *               battery explains the staleness and gets worse on its own, so
+ *               reporting age instead sends the owner to debug the wrong thing.
  *
  *   stale       The data is old but the device is otherwise healthy.
  *

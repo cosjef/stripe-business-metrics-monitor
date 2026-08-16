@@ -26,6 +26,7 @@
 #include "layout.h"
 #include "hero_size.h"
 #include "screens.h"
+#include "battery.h"
 #include "state.h"
 #include "settings.h"
 #include "cache.h"
@@ -453,9 +454,14 @@ static void show_current(const char *why)
      * returns before the rotation task ever starts -- so `provisioned` is true
      * by construction here.
      */
+    /* Read once per render rather than per poll: the cell moves slowly, and
+     * this keeps the warning responsive to the button as well as the timer. */
+    const battery_level_t batt = battery_current_level();
+
     const device_status_t status = {
         .provisioned = true,
         .auth_failed = s_auth_failed,
+        .battery_warn = battery_should_warn(batt),
         .stale = stale,
     };
 
@@ -502,6 +508,42 @@ static void show_current(const char *why)
         ESP_LOGW(TAG, "[%d/%d] %s: '%s' STALE %s (%s)",
                  s_index + 1, s_visible_count, s_rotation[id].label,
                  s_rotation[id].hero, age_str, why);
+        return;
+    }
+
+    case DISPLAY_BATTERY: {
+        const int mv = battery_read_mv();
+        const bool critical = (batt == BATTERY_CRITICAL);
+
+        /*
+         * Percent from voltage across the usable 3.0-4.2V range. Crude -- the
+         * lithium discharge curve is not linear -- but the number only needs to
+         * convey "how urgent", and the exact voltage is in the footer for
+         * anyone who wants precision.
+         */
+        int pct = (mv - 3000) * 100 / (4200 - 3000);
+        if (pct < 0) {
+            pct = 0;
+        } else if (pct > 100) {
+            pct = 100;
+        }
+
+        char pct_str[8];
+        snprintf(pct_str, sizeof(pct_str), "%d%%", pct);
+
+        /* Sized for a corrupt reading, not just a plausible one: mv is an int
+         * and a broken ADC can hand back anything. */
+        char volts[24];
+        snprintf(volts, sizeof(volts), "%d.%02dV", mv / 1000, (mv % 1000) / 10);
+
+        lvgl_port_lock(0);
+        screen_draw_battery(lv_screen_active(), pct_str,
+                            critical ? "shutting down soon" : "plug in soon",
+                            volts, critical);
+        lvgl_port_unlock();
+
+        ESP_LOGW(TAG, "BATTERY %s: %dmV (%d%%) (%s)",
+                 critical ? "CRITICAL" : "LOW", mv, pct, why);
         return;
     }
 
@@ -967,6 +1009,11 @@ static void run_normal_mode(void)
     if (button_start(on_button_press) != ESP_OK) {
         ESP_LOGW(TAG, "button unavailable; rotation is timer-only");
     }
+
+    /* Battery sensing. Not fatal if it fails -- without a reading the level
+     * reports unknown, which never warns, so the device behaves exactly as it
+     * did before the cell existed. */
+    battery_start();
 
     /* Load the stored key and start fetching real data. */
     char key[STRIPE_KEY_MAX_LEN + 1] = "";

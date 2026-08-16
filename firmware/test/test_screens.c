@@ -356,6 +356,38 @@ static void test_red_discipline(void)
     check_int("and green is not used", count_color(COLOR_GREEN), 0);
 }
 
+/*
+ * The low battery screen. Not in the original spec -- added with the cell.
+ *
+ * Amber for low, red for critical, matching how the deck already separates a
+ * degraded state from a threshold breach (spec 4.2).
+ */
+static void test_battery_screen(void)
+{
+    current_screen = "battery";
+    printf("low battery screen\n");
+
+    screen_draw_battery(harness_screen(), "18%", "plug in soon", "3.42V", 0);
+    harness_render();
+
+    expect_background();
+    expect_padding_respected();
+    check_true("low battery uses amber", count_color(COLOR_AMBER) > 100);
+    check_int("low battery uses no red", count_color(COLOR_RED), 0);
+
+    /* Critical escalates to red. */
+    screen_draw_battery(harness_screen(), "4%", "shutting down soon", "3.28V", 1);
+    harness_render();
+
+    expect_background();
+    expect_padding_respected();
+    check_true("critical battery uses red", count_color(COLOR_RED) > 100);
+    check_int("critical battery drops amber", count_color(COLOR_AMBER), 0);
+
+    /* Never green -- a dying battery is not a gain under any reading. */
+    check_int("no green on a battery warning", count_color(COLOR_GREEN), 0);
+}
+
 /* ---- state screens ---- */
 
 /*
@@ -479,6 +511,7 @@ int main(void)
     test_hero_sizing_on_screen();
     test_green_discipline();
     test_red_discipline();
+    test_battery_screen();
     test_stale_screen();
     test_auth_error_screen();
     test_setup_screen();

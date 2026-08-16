@@ -26,6 +26,7 @@ static const char *state_name(display_state_t s)
     switch (s) {
     case DISPLAY_SETUP:      return "SETUP";
     case DISPLAY_AUTH_ERROR: return "AUTH_ERROR";
+    case DISPLAY_BATTERY:    return "BATTERY";
     case DISPLAY_STALE:      return "STALE";
     case DISPLAY_ROTATION:   return "ROTATION";
     }
@@ -134,34 +135,88 @@ static void test_setup_outranks_everything(void)
  */
 static void test_all_combinations(void)
 {
-    printf("all 8 flag combinations resolve as specified\n");
+    printf("all 16 flag combinations resolve as specified\n");
 
     for (int p = 0; p < 2; p++) {
         for (int a = 0; a < 2; a++) {
-            for (int s = 0; s < 2; s++) {
-                const device_status_t st = {
-                    .provisioned = (p != 0),
-                    .auth_failed = (a != 0),
-                    .stale = (s != 0),
-                };
+            for (int b = 0; b < 2; b++) {
+                for (int s = 0; s < 2; s++) {
+                    const device_status_t st = {
+                        .provisioned = (p != 0),
+                        .auth_failed = (a != 0),
+                        .battery_warn = (b != 0),
+                        .stale = (s != 0),
+                    };
 
-                display_state_t want;
-                if (!p) {
-                    want = DISPLAY_SETUP;
-                } else if (a) {
-                    want = DISPLAY_AUTH_ERROR;
-                } else if (s) {
-                    want = DISPLAY_STALE;
-                } else {
-                    want = DISPLAY_ROTATION;
+                    display_state_t want;
+                    if (!p) {
+                        want = DISPLAY_SETUP;
+                    } else if (a) {
+                        want = DISPLAY_AUTH_ERROR;
+                    } else if (b) {
+                        want = DISPLAY_BATTERY;
+                    } else if (s) {
+                        want = DISPLAY_STALE;
+                    } else {
+                        want = DISPLAY_ROTATION;
+                    }
+
+                    char what[96];
+                    snprintf(what, sizeof(what),
+                             "provisioned=%d auth=%d battery=%d stale=%d",
+                             p, a, b, s);
+                    check_state(what, display_state(&st), want);
                 }
-
-                char what[80];
-                snprintf(what, sizeof(what),
-                         "provisioned=%d auth_failed=%d stale=%d", p, a, s);
-                check_state(what, display_state(&st), want);
             }
         }
+    }
+}
+
+/*
+ * Battery warnings sit between auth error and stale.
+ *
+ * Below auth error: a rejected key means no more numbers at all, which outlives
+ * any battery state -- and the fix (re-issue the key) is unrelated to power.
+ *
+ * Above stale: a dying battery explains the staleness and will get worse on its
+ * own. Telling the owner their data is 20 minutes old, when the real story is
+ * that the device is minutes from shutting down, sends them to debug the wrong
+ * thing -- the same reasoning that puts auth error above stale.
+ */
+static void test_battery_precedence(void)
+{
+    printf("battery warning sits between auth error and stale (spec 6.2)\n");
+
+    const device_status_t low = {
+        .provisioned = true, .battery_warn = true,
+    };
+    check_state("low battery alone -> battery screen",
+                display_state(&low), DISPLAY_BATTERY);
+
+    const device_status_t low_and_stale = {
+        .provisioned = true, .battery_warn = true, .stale = true,
+    };
+    check_state("battery outranks stale",
+                display_state(&low_and_stale), DISPLAY_BATTERY);
+
+    const device_status_t low_and_auth = {
+        .provisioned = true, .battery_warn = true, .auth_failed = true,
+    };
+    check_state("auth error outranks battery",
+                display_state(&low_and_auth), DISPLAY_AUTH_ERROR);
+
+    const device_status_t unprovisioned = {
+        .provisioned = false, .battery_warn = true,
+    };
+    check_state("setup outranks battery",
+                display_state(&unprovisioned), DISPLAY_SETUP);
+
+    /* The warning takes the screen over: there is one thing to say, and
+     * cycling metrics behind a dying battery would be noise. */
+    checks++;
+    if (display_state_rotates(DISPLAY_BATTERY)) {
+        failures++;
+        printf("  FAIL battery screen must not rotate\n");
     }
 }
 
@@ -275,6 +330,7 @@ int main(void)
     test_states_in_isolation();
     test_auth_outranks_stale();
     test_setup_outranks_everything();
+    test_battery_precedence();
     test_all_combinations();
     test_transition_sequences();
     test_stale_does_not_freeze_rotation();

@@ -183,3 +183,30 @@ void screen_draw_setup(lv_obj_t *scr, const char *line1, const char *ssid,
     label_at_baseline(scr, version, font_for_size(SIZE_FOOTER), COLOR_DIM,
                       PAD_PX, FOOTER_BASELINE_Y);
 }
+
+void screen_draw_battery(lv_obj_t *scr, const char *pct, const char *line,
+                         const char *voltage, _Bool critical)
+{
+    reset_screen(scr);
+
+    /* Amber for low, red for critical -- the same distinction the rest of the
+     * deck draws between a degraded state and a threshold breach (spec 4.2). */
+    const uint32_t accent = critical ? COLOR_RED : COLOR_AMBER;
+
+    label_at_top(scr, critical ? "BATTERY CRITICAL" : "BATTERY LOW",
+                 font_for_size(SIZE_LABEL), accent, PAD_PX, LABEL_BASELINE_Y);
+
+    /* The percentage is what the owner acts on, so it gets hero treatment and
+     * the accent color. */
+    const int hero_px = hero_size_for_text(pct);
+    label_at_baseline(scr, pct, font_for_size(hero_px), accent,
+                      PAD_PX, HERO_BASELINE_Y);
+
+    label_at_baseline(scr, line, font_for_size(SIZE_SUBTITLE), COLOR_PRIMARY,
+                      PAD_PX, SUBTITLE_BASELINE_Y);
+
+    /* Voltage is diagnostic, not actionable -- same footer treatment as the
+     * auth error code. */
+    label_at_baseline(scr, voltage, font_for_size(SIZE_FOOTER), COLOR_DIM,
+                      PAD_PX, FOOTER_BASELINE_Y);
+}
