@@ -304,6 +304,58 @@ static void test_green_discipline(void)
     check_true("new-paid hero is green", count_color(COLOR_GREEN) > 200);
 }
 
+/*
+ * Red is reserved for threshold breaches (spec 4.2), which in this deck means
+ * exactly one screen: FAILED. Everything else must contain none.
+ */
+static void test_red_discipline(void)
+{
+    current_screen = "red";
+    printf("red appears only on the alert screen (spec 4.2)\n");
+
+    const screen_data_t alert = {
+        .label = "FAILED", .hero = "$29", .subtitle = "1 payment, retrying",
+        .hero_is_alert = 1,
+        .dot_index = 3, .dot_count = 8,
+    };
+    screen_draw_rotation(harness_screen(), &alert);
+    harness_render();
+    check_true("alert hero is red", count_color(COLOR_RED) > 100);
+    check_int("no green on an alert", count_color(COLOR_GREEN), 0);
+
+    /* An ordinary screen must contain no red at all. */
+    const screen_data_t normal = {
+        .label = "MRR", .hero = "$941", .subtitle = "",
+        .dot_index = 0, .dot_count = 8,
+    };
+    screen_draw_rotation(harness_screen(), &normal);
+    harness_render();
+    check_int("no red on a normal screen", count_color(COLOR_RED), 0);
+
+    /* A gain screen is green, never red. */
+    const screen_data_t gain = {
+        .label = "NEW PAID", .hero = "2", .subtitle = "today",
+        .hero_is_gain = 1,
+        .dot_index = 1, .dot_count = 8,
+    };
+    screen_draw_rotation(harness_screen(), &gain);
+    harness_render();
+    check_int("no red on a gain", count_color(COLOR_RED), 0);
+    check_true("gain is green", count_color(COLOR_GREEN) > 100);
+
+    /* If both flags are somehow set, the alert wins: a breach is the more
+     * important thing to say. */
+    const screen_data_t both = {
+        .label = "ODD", .hero = "$1", .subtitle = "",
+        .hero_is_gain = 1, .hero_is_alert = 1,
+        .dot_index = 0, .dot_count = 8,
+    };
+    screen_draw_rotation(harness_screen(), &both);
+    harness_render();
+    check_true("alert outranks gain", count_color(COLOR_RED) > 0);
+    check_int("and green is not used", count_color(COLOR_GREEN), 0);
+}
+
 /* ---- state screens ---- */
 
 /*
@@ -426,6 +478,7 @@ int main(void)
     test_rotation_dots();
     test_hero_sizing_on_screen();
     test_green_discipline();
+    test_red_discipline();
     test_stale_screen();
     test_auth_error_screen();
     test_setup_screen();

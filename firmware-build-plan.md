@@ -56,6 +56,35 @@ Checked the rest of the palette against the collapsed band: only the background 
 
 Re-run `main/colortest.c` if the panel, driver, or backlight setting ever changes.
 
+### Accent color discipline (spec §4.2)
+
+Spec §4.2 reserves green for realized gains and warns that "if everything is
+green, green means nothing". Green had drifted onto screens that were merely
+reporting a level (PAID SUBS decoratively, MRR unconditionally); both were
+removed, and the remaining screens only turn green once they know the value is
+actually a gain.
+
+Red follows the same rule, and §4.2 keeps it out of the base palette entirely —
+it is added "only for threshold breaches, so its appearance carries
+information". It is used on **exactly one screen: FAILED**, the only screen that
+is actionable rather than informational: money actively being lost to a declined
+card, and recoverable if acted on. Cancellations are deliberately *not* red —
+churn is ordinary business, not a breach.
+
+`COLOR_RED` is `#E74D63`: 5.64:1 against the `#000000` field (clears WCAG AA),
+and it round-trips through RGB565 **exactly**. That last property is a hard
+requirement for accent colors here, not a nicety. The first candidate `#E0555F`
+(5.63:1) renders as `#E7555A` — a 7/255 red shift, invisible to the eye but
+enough that the constant in `layout.h` was not the color on the glass, and pixel
+tests comparing against the constant failed. Stripe's own error red `#CD3D64`
+was rejected separately at 4.45:1, below AA and muddy at distance.
+
+`test_layout.c` pins all of this: red is outside the collapsed band, survives
+RGB565 unchanged, and stays separated from `COLOR_AMBER` in the green channel so
+a future edit cannot let it drift orange into the degraded-state color.
+`test_screens.c` asserts red appears on the alert screen and on **no** other —
+the check that keeps red from spreading the way green did.
+
 **Diagnosing this took five attempts.** The earlier wrong turns — flipping `invert_color`, blaming a double byte-swap, blaming the LVGL theme — are recorded in the git history of `display.c`; the actual settings that are correct for this board are `invert_color(true)` and `swap_bytes = true`, matching Waveshare's example. Two config lines inherited from that example (`CONFIG_LV_COLOR_16_SWAP`, `CONFIG_LV_MEM_CUSTOM`) are LVGL 8 options that LVGL 9 silently ignores and have been removed. Note also that `sizeof(lv_color_t) == 3` is **normal** in LVGL 9 — it is always RGB888 at the API level, with `lv_color16_t` used in the draw buffer — so it is not evidence of a color-depth misconfiguration.
 
 ### Typeface deviation from spec §5.4 (decided 2026-08-15)

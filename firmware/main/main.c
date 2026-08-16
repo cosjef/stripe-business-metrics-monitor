@@ -122,7 +122,10 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
     [SCREEN_ARR]        = { .label = "ANNUAL RUN RATE", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_ARPU]       = { .label = "ARPU",       .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_NET_CHANGE] = { .label = "NET 30D",    .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    [SCREEN_FAILED]     = { .label = "FAILED",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    /* The only red in the deck (spec 4.2): actively losing money, and
+     * recoverable if acted on. */
+    [SCREEN_FAILED]     = { .label = "FAILED",     .hero_is_gain = 0,
+                            .hero_is_alert = 1,    .subtitle_is_gain = 0 },
 };
 
 /*

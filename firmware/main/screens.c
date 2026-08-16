@@ -98,9 +98,17 @@ void screen_draw_rotation(lv_obj_t *scr, const screen_data_t *data)
                  PAD_PX, LABEL_BASELINE_Y);
 
     /* Hero size is computed from the value, never hardcoded (spec 2.4). */
+    /* Red outranks green: a screen cannot be both a gain and a breach, and if
+     * the flags ever disagree the alert is the more important thing to say. */
+    uint32_t hero_color = COLOR_PRIMARY;
+    if (data->hero_is_alert) {
+        hero_color = COLOR_RED;
+    } else if (data->hero_is_gain) {
+        hero_color = COLOR_GREEN;
+    }
+
     const int hero_px = hero_size_for_text(data->hero);
-    label_at_baseline(scr, data->hero, font_for_size(hero_px),
-                      data->hero_is_gain ? COLOR_GREEN : COLOR_PRIMARY,
+    label_at_baseline(scr, data->hero, font_for_size(hero_px), hero_color,
                       PAD_PX, HERO_BASELINE_Y);
 
     if (data->subtitle && data->subtitle[0]) {

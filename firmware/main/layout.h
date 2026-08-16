@@ -62,6 +62,26 @@
 #define COLOR_GREEN     0x5DCAA5  /* realized gains ONLY (spec 4.2) */
 #define COLOR_AMBER     0xEF9F27  /* degraded states ONLY (spec 4.2) */
 
+/*
+ * Red. Spec 4.2 keeps this out of the base palette, adding it "only for
+ * threshold breaches, so its appearance carries information".
+ *
+ * Used on exactly one screen: FAILED, the only screen that is actionable
+ * rather than informational -- money actively being lost to a declined card,
+ * and recoverable if acted on. Everything else reports; this one asks.
+ *
+ * #E74D63 measures 5.64:1 against the near-black field, clearing WCAG AA, and
+ * round-trips through RGB565 exactly -- the panel shows the value written here,
+ * with no quantization drift. Two rejected candidates: Stripe's own error red
+ * (#CD3D64) at 4.45:1 is below AA and muddy at distance, and #E0555F quantizes
+ * to #E7555A, a 7/255 shift that makes the rendered color differ from the
+ * constant.
+ *
+ * Adding red anywhere else re-creates the dilution spec 4.2 warns about for
+ * green. A cancellation is ordinary business, not a breach.
+ */
+#define COLOR_RED       0xE74D63  /* threshold breaches ONLY (spec 4.2) */
+
 /* Timing (appendix A) */
 /*
  * Spec appendix A specifies 8s, written for a six-screen deck. With eight

@@ -22,6 +22,7 @@ typedef struct {
     const char *hero;       /* the value; size computed from its width */
     const char *subtitle;   /* context line, 22px */
     _Bool hero_is_gain;     /* hero in green -- realized gains ONLY (spec 4.2) */
+    _Bool hero_is_alert;    /* hero in red -- threshold breaches ONLY (spec 4.2) */
     _Bool subtitle_is_gain; /* subtitle in green, same rule */
     int dot_index;          /* which rotation dot is filled, 0-based */
     int dot_count;          /* how many dots to draw */

@@ -8,6 +8,7 @@
  * mispositioned text, a background color the panel cannot render, and dots
  * whose color collapsed into the background.
  */
+#include <math.h>
 #include <stdio.h>
 
 #include "../main/baseline.h"
@@ -148,6 +149,49 @@ static int luma_x1000(unsigned int rgb)
 #define COLLAPSED_BAND_LOW_X1000  (4 * 1000)
 #define COLLAPSED_BAND_HIGH_X1000 (0x30 * 1000)
 
+/*
+ * WCAG 2.x contrast ratio, returned as ratio*100 so this stays integer-only.
+ * Relative luminance needs a gamma curve; a 256-entry lookup computed once
+ * avoids pulling <math.h> and floating point into the test.
+ */
+static unsigned int contrast_x100(unsigned int fg, unsigned int bg)
+{
+    /* sRGB channel -> linear, scaled by 100000. */
+    static unsigned int lin[256];
+    static int built = 0;
+    if (!built) {
+        for (int i = 0; i < 256; i++) {
+            const double c = i / 255.0;
+            const double v = (c <= 0.04045) ? (c / 12.92)
+                                            : pow((c + 0.055) / 1.055, 2.4);
+            lin[i] = (unsigned int)(v * 100000.0 + 0.5);
+        }
+        built = 1;
+    }
+
+    /* Rec.709 luma weights, per WCAG. */
+    #define LUM(x) ((2126u * lin[((x) >> 16) & 0xFF] \
+                   + 7152u * lin[((x) >> 8) & 0xFF]  \
+                   +  722u * lin[(x) & 0xFF]) / 10000u)
+
+    unsigned int a = LUM(fg), b = LUM(bg);
+    if (a < b) { const unsigned int t = a; a = b; b = t; }
+    #undef LUM
+
+    /* (L1 + 0.05) / (L2 + 0.05), with 0.05 at the same 100000 scale. */
+    return (a + 5000u) * 100u / (b + 5000u);
+}
+
+/* What the panel actually shows: 8-bit channels truncated to 5/6/5 and
+ * expanded back, the same conversion esp_lcd performs on every pixel. */
+static unsigned int rgb565_roundtrip(unsigned int rgb)
+{
+    const unsigned int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
+    const unsigned int R = r >> 3, G = g >> 2, B = b >> 3;
+    return (((R << 3) | (R >> 2)) << 16) | (((G << 2) | (G >> 4)) << 8)
+           | ((B << 3) | (B >> 2));
+}
+
 static int in_collapsed_band(unsigned int rgb)
 {
     int y = luma_x1000(rgb);
@@ -170,6 +214,35 @@ static void test_palette_is_renderable(void)
     check_true("COLOR_PRIMARY outside collapsed band",  !in_collapsed_band(COLOR_PRIMARY));
     check_true("COLOR_GREEN outside collapsed band",    !in_collapsed_band(COLOR_GREEN));
     check_true("COLOR_AMBER outside collapsed band",    !in_collapsed_band(COLOR_AMBER));
+    check_true("COLOR_RED outside collapsed band",      !in_collapsed_band(COLOR_RED));
+
+    /*
+     * COLOR_RED must survive RGB565 exactly. The first candidate (#E0555F)
+     * rendered as #E7555A -- close enough to look right, but it meant the
+     * constant in layout.h was not the color on the glass, and pixel tests
+     * comparing against the constant failed. Accent colors are pinned to
+     * values the panel can represent, so source and screen agree.
+     */
+    check_true("COLOR_RED survives RGB565 unchanged",
+               rgb565_roundtrip(COLOR_RED) == COLOR_RED);
+
+    /* Red must stay distinguishable from amber: both are warning-adjacent, and
+     * at arm's length a red that drifts orange reads as the degraded state. */
+    /*
+     * The accent colors must clear WCAG AA (4.5:1) against the field. This is
+     * asserted, not just documented: a future red could round-trip cleanly and
+     * stay clear of amber while quietly dropping below AA. Integer math at
+     * 1000x to keep floating point out of the test.
+     */
+    check_true("COLOR_RED clears WCAG AA on the background",
+               contrast_x100(COLOR_RED, COLOR_BG) >= 450);
+    check_true("COLOR_AMBER clears WCAG AA on the background",
+               contrast_x100(COLOR_AMBER, COLOR_BG) >= 450);
+    check_true("COLOR_GREEN clears WCAG AA on the background",
+               contrast_x100(COLOR_GREEN, COLOR_BG) >= 450);
+
+    check_true("COLOR_RED distinct from COLOR_AMBER",
+               ((COLOR_RED >> 8) & 0xFF) + 40 < ((COLOR_AMBER >> 8) & 0xFF));
 
     /* The spec's original background would fail this -- documents why we
      * deviate, and fails loudly if someone restores it. */
