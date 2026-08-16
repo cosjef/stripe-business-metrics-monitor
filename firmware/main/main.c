@@ -86,9 +86,9 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
     [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CANCELLATIONS] = { .label = "CANCELLED", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_ARR]        = { .label = "ARR",        .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    [SCREEN_ARPU]       = { .label = "PER CUSTOMER", .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_ARPU]       = { .label = "ARPU",       .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_NET_CHANGE] = { .label = "NET 30D",    .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    [SCREEN_FAILED]     = { .label = "UNPAID",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_FAILED]     = { .label = "FAILED",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
 };
 
 /*
@@ -163,7 +163,9 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
 
     format_money_compact(mrr_arpu_cents(t->mrr_cents, t->active_count),
                          s_values[SCREEN_ARPU].hero, FIELD_LEN);
-    snprintf(s_values[SCREEN_ARPU].subtitle, FIELD_LEN, "per month");
+    /* "subscriber" rather than "customer": the figure is per subscription, and
+     * one customer may hold several (see mrr_arpu_cents). */
+    snprintf(s_values[SCREEN_ARPU].subtitle, FIELD_LEN, "avg per subscriber");
 
     /* Today's deltas need the events endpoint, which lands with the polling
      * layer. Dashes rather than a fabricated zero. */
@@ -249,8 +251,11 @@ static void apply_events(const event_totals_t *e)
             snprintf(body, sizeof(body), "%d", net);
         }
         snprintf(s_values[SCREEN_NET_CHANGE].hero, FIELD_LEN, "%s", body);
+        /* The window is already in the label, and CANCELLED next door also
+         * says "last 30 days" -- repeating it three times across two adjacent
+         * screens is noise. */
         snprintf(s_values[SCREEN_NET_CHANGE].subtitle, FIELD_LEN,
-                 "subs, last 30 days");
+                 "subscribers");
         /* Green only for genuine growth (spec 4.2). */
         s_rotation[SCREEN_NET_CHANGE].hero_is_gain = net > 0;
     }
@@ -632,8 +637,10 @@ static void refresh_task(void *arg)
                 lvgl_port_lock(0);
                 format_money_compact(failed_cents,
                                      s_values[SCREEN_FAILED].hero, FIELD_LEN);
+                /* "retrying" is accurate and useful context: Stripe keeps
+                 * attempting on a schedule, so this may resolve itself. */
                 snprintf(s_values[SCREEN_FAILED].subtitle, FIELD_LEN,
-                         "%d unpaid invoice%s", failed_count,
+                         "%d payment%s, retrying", failed_count,
                          failed_count == 1 ? "" : "s");
                 s_rotation[SCREEN_FAILED].hero = s_values[SCREEN_FAILED].hero;
                 s_rotation[SCREEN_FAILED].subtitle =

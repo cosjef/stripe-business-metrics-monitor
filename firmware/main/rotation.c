@@ -80,18 +80,35 @@ int rotation_build(const rotation_state_t *st, screen_id_t *out)
      * movement metrics rather than at the end. */
     static const screen_id_t order[] = {
         /*
-         * Order: the headline first, then movement, then composition, then
-         * the conditional exceptions. Failed payments sits high because it is
-         * the only screen that is actionable rather than informational.
+         * Grouped by what the reader is asking, so related figures sit
+         * together rather than being interleaved:
+         *
+         *   REVENUE      what the business earns
+         *   ALERT        what needs attention
+         *   MOVEMENT     what changed
+         *   COMPOSITION  who you have
+         *
+         * MRR leads as the anchor metric (spec 6.1), with ARPU beside it
+         * since it is the same figure per subscriber. FAILED comes early
+         * rather than last so the one actionable screen is not buried at the
+         * end of a 48-second cycle.
          */
+
+        /* Revenue */
         SCREEN_MRR,
+        SCREEN_ARPU,
+        SCREEN_ARR,
+
+        /* Alert */
         SCREEN_FAILED,
+
+        /* Movement */
         SCREEN_NET_CHANGE,
         SCREEN_NEW_PAID,
         SCREEN_CANCELLATIONS,
+
+        /* Composition */
         SCREEN_PAID_SUBS,
-        SCREEN_ARPU,
-        SCREEN_ARR,
         SCREEN_TRIALS,
         SCREEN_CONVERSION,
     };

@@ -450,9 +450,12 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
 }
 
 /*
- * Open invoices are ones Stripe has issued but not collected. Past their due
- * date with retries exhausted, they become uncollectible; both states are
- * revenue at risk.
+ * Invoices Stripe has tried and failed to collect.
+ *
+ * `status=open` alone is not enough: it includes invoices that are simply not
+ * due yet, which are not revenue at risk and would make the screen cry wolf.
+ * An invoice Stripe has actually attempted has attempt_count > 0, so that is
+ * the filter applied below.
  */
 #define INVOICES_BUF_LEN (128 * 1024)
 
@@ -535,6 +538,20 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
 
     const cJSON *inv = NULL;
     cJSON_ArrayForEach(inv, data) {
+        /*
+         * Only count invoices Stripe has actually tried to charge. An invoice
+         * issued this morning and not yet due is open, but nothing has failed
+         * -- counting it would make the screen alarming for no reason.
+         */
+        const cJSON *attempts =
+            cJSON_GetObjectItemCaseSensitive(inv, "attempt_count");
+        const int attempt_count =
+            cJSON_IsNumber(attempts) ? (int)attempts->valuedouble : 0;
+
+        if (attempt_count < 1) {
+            continue;
+        }
+
         /* amount_due is what remains uncollected; amount_paid may be partial. */
         const cJSON *due = cJSON_GetObjectItemCaseSensitive(inv, "amount_due");
         const cJSON *paid = cJSON_GetObjectItemCaseSensitive(inv, "amount_paid");
@@ -543,7 +560,7 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
         const int64_t p = cJSON_IsNumber(paid) ? (int64_t)paid->valuedouble : 0;
         const int64_t outstanding = d - p;
 
-        /* A zero-value open invoice is not revenue at risk. */
+        /* A zero-value invoice is not revenue at risk. */
         if (outstanding > 0) {
             count++;
             cents += outstanding;
@@ -555,7 +572,7 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
     if (out_count) *out_count = count;
     if (out_cents) *out_cents = cents;
 
-    ESP_LOGI(TAG, "invoices: HTTP %d, %d unpaid worth %lld cents",
+    ESP_LOGI(TAG, "invoices: HTTP %d, %d failed worth %lld cents",
              status, count, (long long)cents);
 
     return STRIPE_OK;

@@ -63,5 +63,11 @@
 #define COLOR_AMBER     0xEF9F27  /* degraded states ONLY (spec 4.2) */
 
 /* Timing (appendix A) */
-#define ROTATION_INTERVAL_MS   (8 * 1000)
+/*
+ * Spec appendix A specifies 8s. Shortened to 6s because the rotation grew to
+ * eight screens: at 8s the headline metric came round only every 64 seconds,
+ * which is too long to call a glanceable instrument. 6s keeps each screen
+ * readable while bringing the full cycle back under a minute.
+ */
+#define ROTATION_INTERVAL_MS   (6 * 1000)
 #define STALE_THRESHOLD_MS     (15 * 60 * 1000)
