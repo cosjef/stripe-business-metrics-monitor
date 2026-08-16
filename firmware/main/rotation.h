@@ -24,8 +24,7 @@ typedef enum {
     SCREEN_PAID_SUBS,
     SCREEN_TRIALS,
     SCREEN_CONVERSION,
-    SCREEN_LAST_EVENT,
-    SCREEN_CHURN,
+    SCREEN_CANCELLATIONS,
     SCREEN_COUNT
 } screen_id_t;
 
@@ -33,9 +32,8 @@ typedef enum {
 typedef struct {
     bool have_data;      /* a fetch has succeeded at least once */
     int trial_count;
-    int churn_today;
+    int churned_30d;      /* cancellations in the rolling window */
     bool have_conversion; /* 30 days of trial history exist */
-    bool have_last_event;
 } rotation_state_t;
 
 /*

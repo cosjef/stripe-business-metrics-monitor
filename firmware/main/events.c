@@ -59,6 +59,15 @@ int64_t local_day_start_utc(int64_t now_utc, int32_t utc_offset_seconds)
 event_totals_t events_summarize(const stripe_event_t *events, int count,
                                 int64_t day_start_utc)
 {
+    /* Default the rolling window to today, preserving the original behaviour
+     * for callers that only care about daily figures. */
+    return events_summarize_window(events, count, day_start_utc, day_start_utc);
+}
+
+event_totals_t events_summarize_window(const stripe_event_t *events, int count,
+                                       int64_t day_start_utc,
+                                       int64_t window_start_utc)
+{
     event_totals_t t = {0};
 
     if (events == NULL || count <= 0) {
@@ -82,6 +91,12 @@ event_totals_t events_summarize(const stripe_event_t *events, int count,
             t.last_kind = e->kind;
             t.last_created = e->created;
             t.last_amount_cents = e->amount_cents;
+        }
+
+        /* Cancellations over the rolling window. Counted before the daily
+         * filter, since the window is wider than a day. */
+        if (e->kind == EVENT_SUB_DELETED && e->created >= window_start_utc) {
+            t.churned_30d++;
         }
 
         /* Daily figures count only today, or "new paid today" would never

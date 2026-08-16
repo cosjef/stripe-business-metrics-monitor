@@ -85,8 +85,7 @@ static screen_data_t s_rotation[SCREEN_COUNT] = {
     [SCREEN_PAID_SUBS]  = { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 1 },
     [SCREEN_TRIALS]     = { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    [SCREEN_LAST_EVENT] = { .label = "LAST EVENT", .hero_is_gain = 1, .subtitle_is_gain = 0 },
-    [SCREEN_CHURN]      = { .label = "CHURN",      .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_CANCELLATIONS] = { .label = "CANCELLED", .hero_is_gain = 0, .subtitle_is_gain = 0 },
 };
 
 /*
@@ -170,8 +169,8 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
     snprintf(s_values[SCREEN_CONVERSION].hero, FIELD_LEN, "--");
     snprintf(s_values[SCREEN_CONVERSION].subtitle, FIELD_LEN, "needs history");
 
-    snprintf(s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN, "--");
-    snprintf(s_values[SCREEN_LAST_EVENT].subtitle, FIELD_LEN, "needs events");
+    snprintf(s_values[SCREEN_CANCELLATIONS].hero, FIELD_LEN, "--");
+    snprintf(s_values[SCREEN_CANCELLATIONS].subtitle, FIELD_LEN, "last 30 days");
 
     for (int i = 0; i < SCREEN_COUNT; i++) {
         s_rotation[i].hero = s_values[i].hero;
@@ -187,14 +186,8 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
  */
 static void apply_events(const event_totals_t *e)
 {
-    s_rot_state.churn_today = e->churned;
-    s_rot_state.have_last_event = e->have_last;
+    s_rot_state.churned_30d = e->churned_30d;
 
-    /* Churn enters rotation only when nonzero (spec 6.1). */
-    if (e->churned > 0) {
-        format_count(e->churned, s_values[SCREEN_CHURN].hero, FIELD_LEN);
-        snprintf(s_values[SCREEN_CHURN].subtitle, FIELD_LEN, "today");
-    }
 
     /* MRR subtitle: today's realized movement. Green, because spec 4.2
      * reserves green for realized positive movement and nothing else. */
@@ -217,23 +210,15 @@ static void apply_events(const event_totals_t *e)
      * a gain that did not occur. */
     s_rotation[SCREEN_NEW_PAID].hero_is_gain = e->new_paid > 0;
 
-    /* The heartbeat. Confirms the device is live without a status indicator
-     * (spec 6.1). */
-    if (e->have_last) {
-        if (e->last_amount_cents > 0) {
-            format_money_delta(e->last_amount_cents, s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN);
-            s_rotation[SCREEN_LAST_EVENT].hero_is_gain = true;
-        } else {
-            snprintf(s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN, "%s",
-                     event_kind_label(e->last_kind));
-            s_rotation[SCREEN_LAST_EVENT].hero_is_gain = false;
-        }
-
-        char age[16];
-        event_format_age(e->last_created, time(NULL), age, sizeof(age));
-        snprintf(s_values[SCREEN_LAST_EVENT].subtitle, FIELD_LEN, "%s, %s",
-                 event_kind_label(e->last_kind), age);
-    }
+    /*
+     * Cancellations over the last 30 days.
+     *
+     * Replaces the Last Event heartbeat, which showed "changed" from
+     * subscription.updated -- an event that fires for seat changes and
+     * payment-method edits alike and told the reader nothing actionable.
+     */
+    format_count(e->churned_30d, s_values[SCREEN_CANCELLATIONS].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_CANCELLATIONS].subtitle, FIELD_LEN, "last 30 days");
 
     for (int i = 0; i < SCREEN_COUNT; i++) {
         s_rotation[i].hero = s_values[i].hero;
@@ -594,7 +579,10 @@ static void refresh_task(void *arg)
              * without a status indicator, and a today-only window leaves it
              * blank most mornings.
              */
-            const int64_t lookback = day_start - (7 * 86400);
+            /* 30 days back: the cancellations screen needs the full window,
+             * and the daily figures are filtered to today inside
+             * events_summarize_window(). */
+            const int64_t lookback = day_start - (30 * 86400);
 
             event_totals_t ev = {0};
             if (stripe_fetch_events_since(lookback, day_start, &ev) == STRIPE_OK) {

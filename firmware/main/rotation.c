@@ -32,13 +32,19 @@ bool rotation_screen_visible(screen_id_t id, const rotation_state_t *st)
          * trust in the whole device". */
         return st->have_data && st->have_conversion;
 
-    case SCREEN_CHURN:
-        /* Spec 6.1 verbatim: only when nonzero for the period. */
-        return st->have_data && st->churn_today > 0;
-
-    case SCREEN_LAST_EVENT:
-        /* The heartbeat needs an event to report. */
-        return st->have_data && st->have_last_event;
+    case SCREEN_CANCELLATIONS:
+        /*
+         * Always shown once there is data, including at zero.
+         *
+         * Spec 6.1 makes churn conditional to avoid a screen that reads zero
+         * every day. A 30-day window does not have that problem: the figure
+         * is meaningful whatever its value, and zero cancellations in a month
+         * is worth knowing. It also replaces the Last Event heartbeat, which
+         * in practice showed "changed" from subscription.updated -- an event
+         * that fires for seat changes and payment-method edits alike, and so
+         * told the reader nothing actionable.
+         */
+        return st->have_data;
 
     case SCREEN_COUNT:
     default:
@@ -58,11 +64,10 @@ int rotation_build(const rotation_state_t *st, screen_id_t *out)
     static const screen_id_t order[] = {
         SCREEN_MRR,
         SCREEN_NEW_PAID,
-        SCREEN_CHURN,
+        SCREEN_CANCELLATIONS,
         SCREEN_PAID_SUBS,
         SCREEN_TRIALS,
         SCREEN_CONVERSION,
-        SCREEN_LAST_EVENT,
     };
 
     int n = 0;

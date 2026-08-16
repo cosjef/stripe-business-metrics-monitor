@@ -45,6 +45,16 @@ typedef struct {
     int new_paid;             /* subscriptions created today */
     int churned;              /* subscriptions deleted today */
     int64_t revenue_cents;    /* invoices paid today */
+
+    /*
+     * Cancellations over a rolling 30-day window.
+     *
+     * A daily churn count is zero most days, which makes for a screen that
+     * only appears on bad news. A 30-day figure is always meaningful and can
+     * be watched as a trend, which is what makes it worth a permanent slot.
+     */
+    int churned_30d;
+
     bool have_last;           /* whether last_* below are populated */
     event_kind_t last_kind;
     int64_t last_created;
@@ -72,6 +82,14 @@ int64_t local_day_start_utc(int64_t now_utc, int32_t utc_offset_seconds);
  */
 event_totals_t events_summarize(const stripe_event_t *events, int count,
                                 int64_t day_start_utc);
+
+/*
+ * As above, but with an explicit start for the rolling cancellation window.
+ * `window_start_utc` is typically 30 days before now.
+ */
+event_totals_t events_summarize_window(const stripe_event_t *events, int count,
+                                       int64_t day_start_utc,
+                                       int64_t window_start_utc);
 
 /*
  * Human-readable summary of the most recent event, for the Last Event screen:

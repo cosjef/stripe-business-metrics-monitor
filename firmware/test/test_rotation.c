@@ -60,8 +60,8 @@ static void test_no_trials_drops_two_screens(void)
     printf("an account with no trials drops both trial screens\n");
 
     const rotation_state_t st = {
-        .have_data = true, .trial_count = 0, .churn_today = 0,
-        .have_conversion = false, .have_last_event = true,
+        .have_data = true, .trial_count = 0, .churned_30d = 0,
+        .have_conversion = false, 
     };
 
     screen_id_t list[SCREEN_COUNT];
@@ -73,7 +73,7 @@ static void test_no_trials_drops_two_screens(void)
     check_true("MRR present", contains(list, n, SCREEN_MRR));
     check_true("new paid present", contains(list, n, SCREEN_NEW_PAID));
     check_true("paid subs present", contains(list, n, SCREEN_PAID_SUBS));
-    check_true("last event present", contains(list, n, SCREEN_LAST_EVENT));
+    check_true("cancellations present", contains(list, n, SCREEN_CANCELLATIONS));
 
     check_int("four screens", n, 4);
 }
@@ -83,8 +83,8 @@ static void test_trials_appear_when_present(void)
     printf("trials appear once the account has them\n");
 
     const rotation_state_t st = {
-        .have_data = true, .trial_count = 11, .churn_today = 0,
-        .have_conversion = false, .have_last_event = true,
+        .have_data = true, .trial_count = 11, .churned_30d = 0,
+        .have_conversion = false, 
     };
 
     screen_id_t list[SCREEN_COUNT];
@@ -100,8 +100,8 @@ static void test_conversion_needs_history(void)
     printf("conversion appears only with history behind it\n");
 
     rotation_state_t st = {
-        .have_data = true, .trial_count = 11, .churn_today = 0,
-        .have_conversion = true, .have_last_event = true,
+        .have_data = true, .trial_count = 11, .churned_30d = 0,
+        .have_conversion = true, 
     };
 
     screen_id_t list[SCREEN_COUNT];
@@ -114,45 +114,25 @@ static void test_conversion_needs_history(void)
 }
 
 /*
- * Spec 6.1's own rule, applied literally.
+ * Cancellations are shown even at zero: unlike a daily churn count, "none in
+ * 30 days" is information worth having.
  */
-static void test_churn_only_when_nonzero(void)
+static void test_cancellations_always_shown(void)
 {
-    printf("churn enters rotation only when nonzero (spec 6.1)\n");
+    printf("cancellations show even at zero\n");
 
     rotation_state_t st = {
-        .have_data = true, .trial_count = 0, .churn_today = 0,
-        .have_conversion = false, .have_last_event = true,
+        .have_data = true, .trial_count = 0, .churned_30d = 0,
+        .have_conversion = false,
     };
 
     screen_id_t list[SCREEN_COUNT];
     int n = rotation_build(&st, list);
-    check_false("hidden at zero", contains(list, n, SCREEN_CHURN));
+    check_true("shown at zero", contains(list, n, SCREEN_CANCELLATIONS));
 
-    st.churn_today = 1;
+    st.churned_30d = 3;
     n = rotation_build(&st, list);
-    check_true("shown when someone churned", contains(list, n, SCREEN_CHURN));
-}
-
-/*
- * The heartbeat is worth nothing if there is no event to report.
- */
-static void test_last_event_needs_an_event(void)
-{
-    printf("last event hides until there is one\n");
-
-    rotation_state_t st = {
-        .have_data = true, .trial_count = 0, .churn_today = 0,
-        .have_conversion = false, .have_last_event = false,
-    };
-
-    screen_id_t list[SCREEN_COUNT];
-    int n = rotation_build(&st, list);
-    check_false("hidden with no events", contains(list, n, SCREEN_LAST_EVENT));
-
-    st.have_last_event = true;
-    n = rotation_build(&st, list);
-    check_true("shown once an event exists", contains(list, n, SCREEN_LAST_EVENT));
+    check_true("shown when nonzero", contains(list, n, SCREEN_CANCELLATIONS));
 }
 
 /*
@@ -172,9 +152,9 @@ static void test_before_first_fetch(void)
     check_true("MRR is shown", contains(list, n, SCREEN_MRR));
 
     /* Conditional screens stay hidden: there is nothing to say yet, and a
-     * churn screen reading zero before any fetch would be a claim we cannot
-     * support. */
-    check_false("no churn", contains(list, n, SCREEN_CHURN));
+     * cancellations screen reading zero before any fetch would be a claim we
+     * cannot support. */
+    check_false("no cancellations yet", contains(list, n, SCREEN_CANCELLATIONS));
     check_false("no conversion", contains(list, n, SCREEN_CONVERSION));
 }
 
@@ -186,8 +166,8 @@ static void test_mrr_always_present(void)
     const rotation_state_t states[] = {
         {0},
         { .have_data = true },
-        { .have_data = true, .trial_count = 5, .churn_today = 3,
-          .have_conversion = true, .have_last_event = true },
+        { .have_data = true, .trial_count = 5, .churned_30d = 3,
+          .have_conversion = true },
     };
 
     screen_id_t list[SCREEN_COUNT];
@@ -206,14 +186,14 @@ static void test_full_account(void)
     printf("an account using everything\n");
 
     const rotation_state_t st = {
-        .have_data = true, .trial_count = 11, .churn_today = 2,
-        .have_conversion = true, .have_last_event = true,
+        .have_data = true, .trial_count = 11, .churned_30d = 2,
+        .have_conversion = true, 
     };
 
     screen_id_t list[SCREEN_COUNT];
     const int n = rotation_build(&st, list);
 
-    check_int("all seven", n, 7);
+    check_int("all six", n, 6);
 }
 
 /* Display order must be stable, so the rotation does not reshuffle. */
@@ -222,8 +202,8 @@ static void test_order_is_stable(void)
     printf("display order is stable\n");
 
     const rotation_state_t st = {
-        .have_data = true, .trial_count = 5, .churn_today = 1,
-        .have_conversion = true, .have_last_event = true,
+        .have_data = true, .trial_count = 5, .churned_30d = 1,
+        .have_conversion = true, 
     };
 
     screen_id_t a[SCREEN_COUNT], b[SCREEN_COUNT];
@@ -248,8 +228,7 @@ int main(void)
     test_no_trials_drops_two_screens();
     test_trials_appear_when_present();
     test_conversion_needs_history();
-    test_churn_only_when_nonzero();
-    test_last_event_needs_an_event();
+    test_cancellations_always_shown();
     test_before_first_fetch();
     test_mrr_always_present();
     test_full_account();

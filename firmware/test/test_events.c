@@ -297,6 +297,81 @@ static void test_age_strings(void)
     check_str("future events read as now", b, "now");
 }
 
+/*
+ * A rolling 30-day cancellation count. Unlike a daily churn figure -- which
+ * reads zero most days and so only surfaces on bad news -- this is always
+ * meaningful and can be watched as a trend.
+ */
+static void test_30_day_cancellations(void)
+{
+    printf("rolling 30-day cancellations\n");
+
+    const int64_t day = 1786000000;
+    const int64_t window = day - (30 * 86400);
+
+    const stripe_event_t events[] = {
+        ev(EVENT_SUB_DELETED, day + 100, 0),          /* today */
+        ev(EVENT_SUB_DELETED, day - 5 * 86400, 0),    /* 5 days ago */
+        ev(EVENT_SUB_DELETED, day - 29 * 86400, 0),   /* 29 days ago */
+        ev(EVENT_SUB_DELETED, day - 31 * 86400, 0),   /* outside the window */
+        ev(EVENT_SUB_CREATED, day - 2 * 86400, 0),    /* not a cancellation */
+    };
+
+    const event_totals_t t =
+        events_summarize_window(events, 5, day, window);
+
+    check_int("three within 30 days", t.churned_30d, 3);
+    check_int("today's churn is separate", t.churned, 1);
+    check_int("creations not counted as churn", t.new_paid, 0);
+}
+
+static void test_30_day_window_boundary(void)
+{
+    printf("the 30-day boundary\n");
+
+    const int64_t day = 1786000000;
+    const int64_t window = day - (30 * 86400);
+
+    const stripe_event_t just_inside[] = { ev(EVENT_SUB_DELETED, window, 0) };
+    check_int("exactly at the boundary counts",
+              events_summarize_window(just_inside, 1, day, window).churned_30d, 1);
+
+    const stripe_event_t just_outside[] = { ev(EVENT_SUB_DELETED, window - 1, 0) };
+    check_int("one second before does not",
+              events_summarize_window(just_outside, 1, day, window).churned_30d, 0);
+}
+
+static void test_no_cancellations(void)
+{
+    printf("an account with no cancellations\n");
+
+    const int64_t day = 1786000000;
+    const stripe_event_t events[] = {
+        ev(EVENT_SUB_CREATED, day + 100, 0),
+        ev(EVENT_INVOICE_PAID, day + 200, 2900),
+    };
+
+    const event_totals_t t =
+        events_summarize_window(events, 2, day, day - 30 * 86400);
+
+    check_int("zero, which is worth showing", t.churned_30d, 0);
+}
+
+/* The original entry point must keep working, counting only today. */
+static void test_summarize_defaults_to_today(void)
+{
+    printf("events_summarize keeps its today-only behaviour\n");
+
+    const int64_t day = 1786000000;
+    const stripe_event_t events[] = {
+        ev(EVENT_SUB_DELETED, day + 100, 0),
+        ev(EVENT_SUB_DELETED, day - 5 * 86400, 0),
+    };
+
+    const event_totals_t t = events_summarize(events, 2, day);
+    check_int("today only", t.churned, 1);
+}
+
 int main(void)
 {
     printf("event classification tests (spec 7.3, 7.4)\n\n");
@@ -313,6 +388,10 @@ int main(void)
     test_empty();
     test_labels();
     test_age_strings();
+    test_30_day_cancellations();
+    test_30_day_window_boundary();
+    test_no_cancellations();
+    test_summarize_defaults_to_today();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

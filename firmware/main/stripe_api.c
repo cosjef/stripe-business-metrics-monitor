@@ -440,18 +440,11 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
 
     cJSON_Delete(root);
 
-    *out = events_summarize(parsed, n, day_start_utc);
+    *out = events_summarize_window(parsed, n, day_start_utc, fetch_since);
 
-    ESP_LOGI(TAG, "events: HTTP %d, %d parsed, %d new paid today, last=%s",
-             status, n, out->new_paid,
-             out->have_last ? event_kind_label(out->last_kind) : "(none)");
+    ESP_LOGI(TAG, "events: HTTP %d, %d parsed, %d new paid today, %d cancelled/30d",
+             status, n, out->new_paid, out->churned_30d);
 
-    /* Which types actually came back, so an empty heartbeat can be
-     * distinguished from a classification problem. */
-    for (int i = 0; i < n && i < 5; i++) {
-        ESP_LOGI(TAG, "  event[%d] kind=%d created=%lld", i,
-                 (int)parsed[i].kind, (long long)parsed[i].created);
-    }
 
     return STRIPE_OK;
 }
