@@ -88,16 +88,16 @@ int rotation_build(const rotation_state_t *st, screen_id_t *out)
          *   MOVEMENT     what changed
          *   COMPOSITION  who you have
          *
-         * MRR leads as the anchor metric (spec 6.1), with ARPU beside it
-         * since it is the same figure per subscriber. FAILED comes early
+         * MRR leads as the anchor metric (spec 6.1), followed by the same
+         * figure annualized and then per subscriber. FAILED comes early
          * rather than last so the one actionable screen is not buried at the
-         * end of a 48-second cycle.
+         * end of the cycle.
          */
 
-        /* Revenue */
+        /* Revenue: totals first, then the per-subscriber breakdown. */
         SCREEN_MRR,
-        SCREEN_ARPU,
         SCREEN_ARR,
+        SCREEN_ARPU,
 
         /* Alert */
         SCREEN_FAILED,

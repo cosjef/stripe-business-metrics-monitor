@@ -64,10 +64,10 @@
 
 /* Timing (appendix A) */
 /*
- * Spec appendix A specifies 8s. Shortened to 6s because the rotation grew to
- * eight screens: at 8s the headline metric came round only every 64 seconds,
- * which is too long to call a glanceable instrument. 6s keeps each screen
- * readable while bringing the full cycle back under a minute.
+ * Spec appendix A specifies 8s, written for a six-screen deck. With eight
+ * screens that made the anchor metric come round only every 64 seconds, which
+ * is too long to call glanceable. 5s brings the full cycle to 40s and still
+ * leaves each screen readable at a glance.
  */
-#define ROTATION_INTERVAL_MS   (6 * 1000)
+#define ROTATION_INTERVAL_MS   (5 * 1000)
 #define STALE_THRESHOLD_MS     (15 * 60 * 1000)
