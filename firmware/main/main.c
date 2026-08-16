@@ -36,6 +36,7 @@
 #include "events.h"
 #include "freshness.h"
 #include "rotation.h"
+#include "button.h"
 
 #include "esp_netif_sntp.h"
 #include <time.h>
@@ -501,6 +502,23 @@ static void rotate_cb(void *arg)
     advance("timer");
 }
 
+/*
+ * Advance on a button press, and restart the interval so the screen you asked
+ * for gets its full time rather than a fraction of whatever was left.
+ *
+ * Rotation is never suspended: the device is an appliance, and one parked on
+ * a single metric stops being the rotating instrument spec 1 describes.
+ */
+static void on_button_press(void)
+{
+    advance("button");
+
+    if (s_rotation_timer) {
+        esp_timer_stop(s_rotation_timer);
+        esp_timer_start_periodic(s_rotation_timer, ROTATION_INTERVAL_MS * 1000);
+    }
+}
+
 
 /* Setup mode: show State C and run the portal until credentials arrive. */
 static char s_setup_ssid[SETUP_SSID_LEN];
@@ -906,6 +924,12 @@ static void run_normal_mode(void)
      * robust fix if this is ever wanted again is the PLUS button on GPIO4 --
      * a debounced digital input with none of these failure modes.
      */
+
+    /* Leftmost button advances the rotation. Not fatal if it fails -- the
+     * device still rotates on its own. */
+    if (button_start(on_button_press) != ESP_OK) {
+        ESP_LOGW(TAG, "button unavailable; rotation is timer-only");
+    }
 
     /* Load the stored key and start fetching real data. */
     char key[STRIPE_KEY_MAX_LEN + 1] = "";

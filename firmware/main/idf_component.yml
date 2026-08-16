@@ -1,4 +1,6 @@
 dependencies:
+  # Debounce and click detection for the front-panel buttons.
+  espressif/button: ^4.1.0
   idf: '>=5.4'
   espressif/esp_lvgl_port: ^2.6.0
   lvgl/lvgl: ^9.3.0
