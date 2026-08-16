@@ -19,11 +19,11 @@ Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-r
 
 Each screen holds for 5 seconds, with manual advance on the leftmost button. Data refreshes fully every 10 minutes and incrementally every 60 seconds, survives reboots via flash cache, and degrades to a stale or auth-error screen rather than showing a confident wrong number.
 
-**Tests: 15 suites, 1,071 checks, 0 failures.** Host-side, rendering through real LVGL into an offscreen framebuffer, so screen output is asserted pixel by pixel rather than by eye.
+**Tests: 16 suites, 1,100 checks, 0 failures.** Host-side, rendering through real LVGL into an offscreen framebuffer, so screen output is asserted pixel by pixel rather than by eye.
 
 Three deviations from the spec are deliberate and documented below: the background is `#000000` (the panel physically cannot render `#121211`), the typeface is Roboto Condensed rather than monospace, and there is no touch input (the board has no touch controller — navigation is the physical button).
 
-One item in Stage 7 is genuinely incomplete: state transitions were each verified by hand on hardware but have no automated test.
+**Stages 1-7 are complete with nothing left unchecked.** Everything remaining is in Parked below, and none of it blocks the device as it stands.
 
 ---
 
@@ -258,7 +258,11 @@ Goal: tie polling → cached state → renderer into the full rotation loop acro
 - [x] Full integration: live Stripe data flowing through polling → MRR engine → cached state → rendering, no hardcoded fixtures remaining
 - [x] Manual advance on the leftmost button (GPIO0) — added by request; not in the spec
 - [x] Accent color discipline (§4.2) — green for realized gains only, red on FAILED only
-- [ ] Verify state transitions (normal → stale → auth error → setup) all correctly interrupt/resume rotation — **partially done.** Stale and auth-error were each forced and confirmed on hardware via the `FORCE_STALE_AFTER_S` / `FORCE_AUTH_FAIL_AFTER_S` switches in `main.c`, but there is no automated test covering the transitions, and `test_rotation.c` does not exercise them
+- [x] Verify state transitions (normal → stale → auth error → setup) all correctly interrupt/resume rotation — covered by `test_state` (29 checks): all 8 flag combinations exhaustively, both precedence rules, full transition sequences including recovery, and the rule that stale keeps rotating while setup and auth-error take the screen over.
+
+  Writing the test required extracting the decision first. The precedence chain was welded into `show_current()` in `main.c`, tangled with LVGL locking and ESP-IDF globals, so nothing host-side could reach it — a test against anything else would have been theater. `main/state.c` now holds it as a pure function over three flags and `main.c` calls it, so the test guards the path the device actually runs.
+
+  Mutation-checked rather than trusted: inverting the auth/stale precedence produces 3 failures, including the exact §6.2 case. Rotation re-confirmed on hardware after the refactor — 8 screens wrapping `[8/8] PAID SUBS` → `[1/8] MRR` at 5s.
 
 ## Stage 8: Power management
 

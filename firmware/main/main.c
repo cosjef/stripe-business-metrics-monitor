@@ -26,6 +26,7 @@
 #include "layout.h"
 #include "hero_size.h"
 #include "screens.h"
+#include "state.h"
 #include "settings.h"
 #include "cache.h"
 #include "wifi.h"
@@ -429,11 +430,6 @@ static void show_current(const char *why)
      */
     const screen_id_t id = s_visible[s_index];
 
-    /*
-     * State B outranks State A. Stale means "this number is old"; an auth
-     * failure means "there will be no more numbers until you act". The second
-     * is the more useful thing to say.
-     */
 #if FORCE_AUTH_FAIL_AFTER_S
     if (now_ms > FORCE_AUTH_FAIL_AFTER_S * 1000) {
         s_auth_failed = true;
@@ -441,7 +437,30 @@ static void show_current(const char *why)
     }
 #endif
 
-    if (s_auth_failed) {
+    bool stale = freshness_is_stale(&s_freshness, now_ms);
+#if FORCE_STALE_AFTER_S
+    if (now_ms > FORCE_STALE_AFTER_S * 1000) {
+        stale = true;
+    }
+#endif
+
+    /*
+     * Which screen wins is decided in state.c, not here: it is a pure function
+     * of these three flags, which is what lets test_state walk every
+     * transition on the host. This function is left holding only the drawing.
+     *
+     * Reaching show_current() at all means provisioning finished -- setup mode
+     * returns before the rotation task ever starts -- so `provisioned` is true
+     * by construction here.
+     */
+    const device_status_t status = {
+        .provisioned = true,
+        .auth_failed = s_auth_failed,
+        .stale = stale,
+    };
+
+    switch (display_state(&status)) {
+    case DISPLAY_AUTH_ERROR: {
         char errcode[24];
         snprintf(errcode, sizeof(errcode), "err %d", s_auth_status);
 
@@ -455,14 +474,7 @@ static void show_current(const char *why)
         return;
     }
 
-    bool stale = freshness_is_stale(&s_freshness, now_ms);
-#if FORCE_STALE_AFTER_S
-    if (now_ms > FORCE_STALE_AFTER_S * 1000) {
-        stale = true;
-    }
-#endif
-
-    if (stale) {
+    case DISPLAY_STALE: {
         const int64_t age = freshness_age_ms(&s_freshness, now_ms);
 
         char age_str[24];
@@ -491,6 +503,15 @@ static void show_current(const char *why)
                  s_index + 1, s_visible_count, s_rotation[id].label,
                  s_rotation[id].hero, age_str, why);
         return;
+    }
+
+    case DISPLAY_SETUP:
+        /* Unreachable: setup mode never starts the rotation task. Handled so
+         * the switch stays exhaustive and -Werror catches a new state. */
+        return;
+
+    case DISPLAY_ROTATION:
+        break;
     }
 
     screen_data_t d = s_rotation[id];
