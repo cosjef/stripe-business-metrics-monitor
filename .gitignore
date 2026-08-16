@@ -30,3 +30,6 @@ firmware/test/test_tapdetect
 firmware/test/test_tapstatus
 firmware/test/test_provision
 firmware/test/test_stripe_key
+firmware/test/test_mrr
+firmware/test/test_format
+firmware/test/test_stripe_parse

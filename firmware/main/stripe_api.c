@@ -1,11 +1,13 @@
 #include "stripe_api.h"
 #include "stripe_key.h"
+#include "stripe_parse.h"
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "esp_tls_errors.h"
+#include "esp_heap_caps.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +21,13 @@ static const char *TAG = "stripe";
  * page is 200-400KB and comes later, in Stage 5, where PSRAM makes a
  * full-buffer parse viable (spec 8.3 assumed far less heap). */
 #define VALIDATE_BUF_LEN (16 * 1024)
+
+/* A full subscriptions page. Spec 7.1 sizes this at 200-400KB, and spec 8.3
+ * assumed it could not be buffered -- but that assumed ~320KB of heap. This
+ * board has 8MB PSRAM, so a full-buffer parse is comfortable. */
+#define SUBS_BUF_LEN (512 * 1024)
+#define SUBS_URL "https://" STRIPE_HOST \
+                 "/v1/subscriptions?status=all&limit=100&expand[]=data.discount"
 
 /* Stripe is not slow, but a phone-tethered or congested network can be. */
 #define HTTP_TIMEOUT_MS 15000
@@ -190,4 +199,105 @@ stripe_validation_t stripe_validate_key(void)
     esp_http_client_cleanup(client);
     free(resp.buf);
     return out;
+}
+
+stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
+{
+    if (out == NULL) {
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+    memset(out, 0, sizeof(*out));
+    if (truncated) {
+        *truncated = false;
+    }
+
+    if (s_key[0] == '\0') {
+        return STRIPE_ERR_UNAUTHORIZED;
+    }
+
+    /* PSRAM: this is far too large for internal RAM, and is exactly the
+     * allocation spec 8.3 assumed was impossible on an ESP32. */
+    response_t resp = {
+        .buf = heap_caps_malloc(SUBS_BUF_LEN, MALLOC_CAP_SPIRAM),
+        .len = 0,
+        .cap = SUBS_BUF_LEN,
+    };
+    if (resp.buf == NULL) {
+        ESP_LOGE(TAG, "could not allocate %d bytes for the response", SUBS_BUF_LEN);
+        return STRIPE_ERR_NO_MEMORY;
+    }
+    resp.buf[0] = '\0';
+
+    const esp_http_client_config_t cfg = {
+        .url = SUBS_URL,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .event_handler = on_http_event,
+        .user_data = &resp,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == NULL) {
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_NO_MEMORY;
+    }
+
+    char auth[STRIPE_KEY_MAX_LEN + 16];
+    snprintf(auth, sizeof(auth), "Bearer %s", s_key);
+    esp_http_client_set_header(client, "Authorization", auth);
+
+    const esp_err_t err = esp_http_client_perform(client);
+    stripe_result_t result;
+
+    if (err != ESP_OK) {
+        result = (err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST ||
+                  err == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED)
+                     ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
+        ESP_LOGE(TAG, "fetch failed: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        heap_caps_free(resp.buf);
+        return result;
+    }
+
+    const int status = esp_http_client_get_status_code(client);
+    result = classify_status(status);
+    esp_http_client_cleanup(client);
+
+    ESP_LOGI(TAG, "subscriptions: HTTP %d, %u bytes", status, (unsigned)resp.len);
+
+    if (result != STRIPE_OK) {
+        heap_caps_free(resp.buf);
+        return result;
+    }
+
+    /* The parsed form is large; keep it in PSRAM too rather than on the
+     * caller's stack. */
+    stripe_subs_t *parsed = heap_caps_malloc(sizeof(stripe_subs_t),
+                                             MALLOC_CAP_SPIRAM);
+    if (parsed == NULL) {
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_NO_MEMORY;
+    }
+
+    if (!stripe_parse_subscriptions(resp.buf, parsed)) {
+        heap_caps_free(parsed);
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+
+    *out = mrr_compute(parsed->subs, parsed->sub_count);
+
+    if (truncated) {
+        *truncated = parsed->truncated || parsed->has_more;
+    }
+
+    ESP_LOGI(TAG, "MRR %lld cents, %d active, %d trials%s%s",
+             (long long)out->mrr_cents, out->active_count, out->trial_count,
+             out->has_tiered ? " (tiered present)" : "",
+             out->mixed_currency ? " (MIXED CURRENCY)" : "");
+
+    heap_caps_free(parsed);
+    heap_caps_free(resp.buf);
+    return STRIPE_OK;
 }

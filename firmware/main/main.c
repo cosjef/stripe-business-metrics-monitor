@@ -32,6 +32,7 @@
 #include "portal.h"
 #include "stripe_key.h"
 #include "stripe_api.h"
+#include "format.h"
 #include "colortest.h"
 
 #include "esp_log.h"
@@ -50,40 +51,79 @@ static const char *TAG = "main";
 #define COLORTEST_ENABLED 0
 
 /*
- * Fixture values, matching the spec's screen deck (6.1) and its mockup images.
- * Replaced by live data in Stage 4.
+ * Screen contents, refreshed from Stripe (spec 7.1, 7.2).
  *
- * Note the churn screen from 6.1 is deliberately absent: it enters rotation
- * only when nonzero, so it needs real data to make sense.
+ * The strings are owned here rather than by the screen code, so a refresh can
+ * rewrite them in place while the rotation timer keeps running.
  */
-static const screen_data_t s_rotation[] = {
-    {
-        .label = "MRR", .hero = "$6.5k", .subtitle = "+$118 today",
-        .hero_is_gain = 0, .subtitle_is_gain = 1,
-    },
-    {
-        /* A realized gain, so the hero is green (spec 4.2). */
-        .label = "NEW PAID", .hero = "2", .subtitle = "today, $58 MRR",
-        .hero_is_gain = 1, .subtitle_is_gain = 0,
-    },
-    {
-        .label = "PAID SUBS", .hero = "94", .subtitle = "+7 this month",
-        .hero_is_gain = 0, .subtitle_is_gain = 1,
-    },
-    {
-        /* Not green: a trial is not yet revenue (spec 6.1). */
-        .label = "TRIALS", .hero = "11", .subtitle = "3 end this week",
-        .hero_is_gain = 0, .subtitle_is_gain = 0,
-    },
-    {
-        .label = "CONVERSION", .hero = "34%", .subtitle = "trial to paid",
-        .hero_is_gain = 0, .subtitle_is_gain = 0,
-    },
-    {
-        .label = "LAST EVENT", .hero = "+$29", .subtitle = "new paid, 2m",
-        .hero_is_gain = 1, .subtitle_is_gain = 0,
-    },
+#define FIELD_LEN 24
+
+static struct {
+    char hero[FIELD_LEN];
+    char subtitle[FIELD_LEN];
+} s_values[6];
+
+static screen_data_t s_rotation[] = {
+    { .label = "MRR",        .hero_is_gain = 0, .subtitle_is_gain = 1 },
+    { .label = "NEW PAID",   .hero_is_gain = 1, .subtitle_is_gain = 0 },
+    { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 1 },
+    { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    { .label = "LAST EVENT", .hero_is_gain = 1, .subtitle_is_gain = 0 },
 };
+
+/* Until the first fetch lands, show dashes rather than invented numbers.
+ * Spec 1 principle 4: the device never lies, and a plausible-looking zero
+ * would be a lie about an account that has not been read yet. */
+static void set_placeholders(void)
+{
+    for (int i = 0; i < 6; i++) {
+        snprintf(s_values[i].hero, FIELD_LEN, "--");
+        s_values[i].subtitle[0] = '\0';
+        s_rotation[i].hero = s_values[i].hero;
+        s_rotation[i].subtitle = s_values[i].subtitle;
+    }
+}
+
+/* Populate the screens from a completed fetch. */
+static void apply_totals(const mrr_totals_t *t, bool truncated)
+{
+    format_money_compact(t->mrr_cents, s_values[0].hero, FIELD_LEN);
+    if (t->mixed_currency) {
+        /* Do not present a sum across currencies as if it were one number. */
+        snprintf(s_values[0].subtitle, FIELD_LEN, "mixed currency");
+    } else if (truncated) {
+        snprintf(s_values[0].subtitle, FIELD_LEN, "partial");
+    } else if (t->has_tiered) {
+        snprintf(s_values[0].subtitle, FIELD_LEN, "excl. usage plans");
+    } else {
+        snprintf(s_values[0].subtitle, FIELD_LEN, "%s", t->currency);
+    }
+
+    /* Today's deltas need the events endpoint, which lands with the polling
+     * layer. Dashes rather than a fabricated zero. */
+    snprintf(s_values[1].hero, FIELD_LEN, "--");
+    snprintf(s_values[1].subtitle, FIELD_LEN, "needs events");
+
+    format_count(t->active_count, s_values[2].hero, FIELD_LEN);
+    snprintf(s_values[2].subtitle, FIELD_LEN, "active");
+
+    format_count(t->trial_count, s_values[3].hero, FIELD_LEN);
+    snprintf(s_values[3].subtitle, FIELD_LEN, "trialing");
+
+    /* Conversion needs 30 days of history; spec 6.1 also cautions it swings
+     * wildly at low volume. */
+    snprintf(s_values[4].hero, FIELD_LEN, "--");
+    snprintf(s_values[4].subtitle, FIELD_LEN, "needs history");
+
+    snprintf(s_values[5].hero, FIELD_LEN, "--");
+    snprintf(s_values[5].subtitle, FIELD_LEN, "needs events");
+
+    for (int i = 0; i < 6; i++) {
+        s_rotation[i].hero = s_values[i].hero;
+        s_rotation[i].subtitle = s_values[i].subtitle;
+    }
+}
 
 #define ROTATION_COUNT ((int)(sizeof(s_rotation) / sizeof(s_rotation[0])))
 
@@ -263,6 +303,48 @@ static void run_key_setup_mode(void)
     esp_restart();
 }
 
+/*
+ * Fetch and display real values.
+ *
+ * Spec 7.3 calls for a full recompute every 10 minutes plus incremental event
+ * polling in between; this implements the full recompute only. Incremental
+ * updates, reconciliation, backoff and the stale screen land with the full
+ * polling layer.
+ */
+#define REFRESH_INTERVAL_MS (10 * 60 * 1000)
+
+static void refresh_task(void *arg)
+{
+    (void)arg;
+
+    /* Let WiFi associate before the first attempt. */
+    vTaskDelay(pdMS_TO_TICKS(3000));
+
+    while (1) {
+        mrr_totals_t totals = {0};
+        bool truncated = false;
+
+        const stripe_result_t r = stripe_fetch_totals(&totals, &truncated);
+
+        if (r == STRIPE_OK) {
+            lvgl_port_lock(0);
+            apply_totals(&totals, truncated);
+            lvgl_port_unlock();
+
+            /* Redraw immediately so the new value appears without waiting out
+             * the rotation interval. */
+            show_current("refresh");
+        } else {
+            /* Leave the previous values on screen rather than blanking them.
+             * Spec 7.4 wants staleness surfaced, which the stale screen will
+             * do properly once the polling layer lands. */
+            ESP_LOGW(TAG, "refresh failed: %s", stripe_result_str(r));
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(REFRESH_INTERVAL_MS));
+    }
+}
+
 static void run_normal_mode(void)
 {
     char ssid[WIFI_SSID_MAX_LEN + 1] = "";
@@ -277,6 +359,7 @@ static void run_normal_mode(void)
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(wifi_start_sta(ssid, pass));
 
+    set_placeholders();
     show_current("boot");
 
     const esp_timer_create_args_t timer_args = {
@@ -296,6 +379,17 @@ static void run_normal_mode(void)
         ESP_ERROR_CHECK(imu_start_tap_watch(on_double_tap));
     } else {
         ESP_LOGW(TAG, "IMU unavailable; rotation is timer-only");
+    }
+
+    /* Load the stored key and start fetching real data. */
+    char key[STRIPE_KEY_MAX_LEN + 1] = "";
+    if (settings_get_stripe_key(key, sizeof(key)) == ESP_OK) {
+        stripe_set_key(key);
+        /* 8KB: this task runs the same TLS handshake that overflowed the
+         * httpd task at 4KB. */
+        xTaskCreate(refresh_task, "refresh", 8192, NULL, 4, NULL);
+    } else {
+        ESP_LOGW(TAG, "no Stripe key stored; screens stay blank");
     }
 }
 

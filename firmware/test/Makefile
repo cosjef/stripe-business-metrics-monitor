@@ -32,9 +32,10 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key
+CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format
 SCREEN_BIN  := test_screens
-BINS        := $(LOGIC_BINS) $(SCREEN_BIN)
+BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
 .PHONY: all test quick clean
 
@@ -83,3 +84,13 @@ test_provision: test_provision.c ../main/provision.c ../main/provision.h
 
 test_stripe_key: test_stripe_key.c ../main/stripe_key.c ../main/stripe_key.h
 	$(CC) $(CFLAGS) -o $@ test_stripe_key.c ../main/stripe_key.c
+
+test_mrr: test_mrr.c ../main/mrr.c ../main/mrr.h
+	$(CC) $(CFLAGS) -o $@ test_mrr.c ../main/mrr.c
+
+test_format: test_format.c ../main/format.c ../main/hero_size.c
+	$(CC) $(CFLAGS) -o $@ test_format.c ../main/format.c ../main/hero_size.c
+
+test_stripe_parse: test_stripe_parse.c ../main/stripe_parse.c ../main/mrr.c
+	$(CC) -std=c11 -w -O0 -I ../main -I $(CJSON) -o $@ \
+	  test_stripe_parse.c ../main/stripe_parse.c ../main/mrr.c $(CJSON)/cJSON.c

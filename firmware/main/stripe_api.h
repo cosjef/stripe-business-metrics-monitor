@@ -12,6 +12,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "mrr.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -42,6 +43,18 @@ typedef struct {
     bool has_subscriptions; /* whether the account has any at all */
     bool test_mode;         /* derived from the key prefix */
 } stripe_validation_t;
+
+/*
+ * Fetch subscriptions and compute totals (spec 7.1, 7.2).
+ *
+ * Uses limit=100 and expands data.discount, because a discount that is not
+ * applied makes a 50%-off annual plan read at double (spec 7.2 step 1). NOTE
+ * this expansion requires the restricted key to also carry Coupons: Read.
+ *
+ * Pagination is not followed: `truncated` reports when an account has more
+ * than one page. Multi-page accounts land with the polling layer.
+ */
+stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated);
 
 /* Set the API key used for subsequent calls. Stored in RAM only. */
 void stripe_set_key(const char *key);
