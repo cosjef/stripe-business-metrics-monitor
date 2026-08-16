@@ -1,6 +1,7 @@
 #include "stripe_api.h"
 #include "stripe_key.h"
 #include "stripe_parse.h"
+#include "events.h"
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -299,5 +300,135 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
 
     heap_caps_free(parsed);
     heap_caps_free(resp.buf);
+    return STRIPE_OK;
+}
+
+/* Events are small: limit=100 of them is a few tens of KB. */
+#define EVENTS_BUF_LEN (128 * 1024)
+#define MAX_EVENTS 100
+
+stripe_result_t stripe_fetch_events(int64_t since_utc, event_totals_t *out)
+{
+    return stripe_fetch_events_since(since_utc, since_utc, out);
+}
+
+stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
+                                          int64_t day_start_utc,
+                                          event_totals_t *out)
+{
+    if (out == NULL) {
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+    memset(out, 0, sizeof(*out));
+
+    if (s_key[0] == '\0') {
+        return STRIPE_ERR_UNAUTHORIZED;
+    }
+
+    char url[256];
+    snprintf(url, sizeof(url),
+             "https://" STRIPE_HOST "/v1/events?limit=%d&created[gte]=%lld",
+             MAX_EVENTS, (long long)fetch_since);
+
+    response_t resp = {
+        .buf = heap_caps_malloc(EVENTS_BUF_LEN, MALLOC_CAP_SPIRAM),
+        .len = 0,
+        .cap = EVENTS_BUF_LEN,
+    };
+    if (resp.buf == NULL) {
+        return STRIPE_ERR_NO_MEMORY;
+    }
+    resp.buf[0] = '\0';
+
+    const esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = HTTP_TIMEOUT_MS,
+        .event_handler = on_http_event,
+        .user_data = &resp,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&cfg);
+    if (client == NULL) {
+        heap_caps_free(resp.buf);
+        return STRIPE_ERR_NO_MEMORY;
+    }
+
+    char auth[STRIPE_KEY_MAX_LEN + 16];
+    snprintf(auth, sizeof(auth), "Bearer %s", s_key);
+    esp_http_client_set_header(client, "Authorization", auth);
+
+    const esp_err_t err = esp_http_client_perform(client);
+    if (err != ESP_OK) {
+        esp_http_client_cleanup(client);
+        heap_caps_free(resp.buf);
+        return (err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST ||
+                err == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED)
+                   ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
+    }
+
+    const int status = esp_http_client_get_status_code(client);
+    stripe_result_t result = classify_status(status);
+    esp_http_client_cleanup(client);
+
+    if (result != STRIPE_OK) {
+        heap_caps_free(resp.buf);
+        return result;
+    }
+
+    cJSON *root = cJSON_Parse(resp.buf);
+    heap_caps_free(resp.buf);
+
+    if (root == NULL) {
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+
+    const cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    if (!cJSON_IsArray(data)) {
+        cJSON_Delete(root);
+        return STRIPE_ERR_BAD_RESPONSE;
+    }
+
+    static stripe_event_t parsed[MAX_EVENTS];
+    int n = 0;
+
+    const cJSON *ev = NULL;
+    cJSON_ArrayForEach(ev, data) {
+        if (n >= MAX_EVENTS) {
+            break;
+        }
+
+        const cJSON *type = cJSON_GetObjectItemCaseSensitive(ev, "type");
+        const cJSON *created = cJSON_GetObjectItemCaseSensitive(ev, "created");
+
+        parsed[n].kind = event_kind_from_type(
+            cJSON_IsString(type) ? type->valuestring : NULL);
+        parsed[n].created = cJSON_IsNumber(created)
+                                ? (int64_t)created->valuedouble : 0;
+        parsed[n].amount_cents = 0;
+
+        /* Invoice amounts live at data.object.amount_paid. */
+        if (parsed[n].kind == EVENT_INVOICE_PAID) {
+            const cJSON *d = cJSON_GetObjectItemCaseSensitive(ev, "data");
+            const cJSON *obj = cJSON_IsObject(d)
+                ? cJSON_GetObjectItemCaseSensitive(d, "object") : NULL;
+            const cJSON *amt = cJSON_IsObject(obj)
+                ? cJSON_GetObjectItemCaseSensitive(obj, "amount_paid") : NULL;
+            if (cJSON_IsNumber(amt)) {
+                parsed[n].amount_cents = (int64_t)amt->valuedouble;
+            }
+        }
+
+        n++;
+    }
+
+    cJSON_Delete(root);
+
+    *out = events_summarize(parsed, n, day_start_utc);
+
+    ESP_LOGI(TAG, "events: HTTP %d, %d parsed, %d new paid today",
+             status, n, out->new_paid);
+
     return STRIPE_OK;
 }

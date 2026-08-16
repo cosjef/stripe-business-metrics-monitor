@@ -12,6 +12,7 @@
 #pragma once
 
 #include "esp_err.h"
+#include "events.h"
 #include "mrr.h"
 
 #include <stdbool.h>
@@ -55,6 +56,24 @@ typedef struct {
  * than one page. Multi-page accounts land with the polling layer.
  */
 stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated);
+
+/*
+ * Fetch recent events (spec 7.3).
+ *
+ * `since_utc` maps to created[gte], so only today's events are pulled. Spec
+ * 7.4 step 4 is emphatic that this needs a correct local-midnight epoch:
+ * Stripe returns UTC, and truncating to UTC midnight rolls "today" over
+ * mid-evening for US timezones.
+ */
+stripe_result_t stripe_fetch_events(int64_t since_utc, event_totals_t *out);
+
+/*
+ * As above, but with separate windows: `fetch_since` is how far back to ask
+ * Stripe, `day_start_utc` is what counts as "today" for the daily figures.
+ */
+stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
+                                          int64_t day_start_utc,
+                                          event_totals_t *out);
 
 /* Set the API key used for subsequent calls. Stored in RAM only. */
 void stripe_set_key(const char *key);

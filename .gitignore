@@ -33,3 +33,5 @@ firmware/test/test_stripe_key
 firmware/test/test_mrr
 firmware/test/test_format
 firmware/test/test_stripe_parse
+firmware/test/test_freshness
+firmware/test/test_events

@@ -33,6 +33,11 @@
 #include "stripe_key.h"
 #include "stripe_api.h"
 #include "format.h"
+#include "events.h"
+#include "freshness.h"
+
+#include "esp_netif_sntp.h"
+#include <time.h>
 #include "colortest.h"
 
 #include "esp_log.h"
@@ -56,7 +61,9 @@ static const char *TAG = "main";
  * The strings are owned here rather than by the screen code, so a refresh can
  * rewrite them in place while the rotation timer keeps running.
  */
-#define FIELD_LEN 24
+/* Wide enough for the longest subtitle ("today, 12 churned") plus slack;
+ * the compiler checks this and will fail the build if a format can overrun. */
+#define FIELD_LEN 40
 
 static struct {
     char hero[FIELD_LEN];
@@ -122,6 +129,57 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
 
     snprintf(s_values[5].hero, FIELD_LEN, "--");
     snprintf(s_values[5].subtitle, FIELD_LEN, "needs events");
+
+    for (int i = 0; i < 6; i++) {
+        s_rotation[i].hero = s_values[i].hero;
+        s_rotation[i].subtitle = s_values[i].subtitle;
+    }
+}
+
+/*
+ * Fill the event-driven screens: New Paid, today's delta on MRR, and the
+ * Last Event heartbeat (spec 6.1, 7.3).
+ */
+static void apply_events(const event_totals_t *e)
+{
+    /* MRR subtitle: today's realized movement. Green, because spec 4.2
+     * reserves green for realized positive movement and nothing else. */
+    if (e->revenue_cents > 0) {
+        char delta[FORMAT_MONEY_LEN];
+        format_money_delta(e->revenue_cents, delta, sizeof(delta));
+        snprintf(s_values[0].subtitle, FIELD_LEN, "%s today", delta);
+        s_rotation[0].subtitle_is_gain = true;
+    }
+
+    /* New paid today. */
+    format_count(e->new_paid, s_values[1].hero, FIELD_LEN);
+    if (e->churned > 0) {
+        snprintf(s_values[1].subtitle, FIELD_LEN, "today, %d churned",
+                 e->churned);
+    } else {
+        snprintf(s_values[1].subtitle, FIELD_LEN, "today");
+    }
+    /* Only green when something actually happened: a green zero would imply
+     * a gain that did not occur. */
+    s_rotation[1].hero_is_gain = e->new_paid > 0;
+
+    /* The heartbeat. Confirms the device is live without a status indicator
+     * (spec 6.1). */
+    if (e->have_last) {
+        if (e->last_amount_cents > 0) {
+            format_money_delta(e->last_amount_cents, s_values[5].hero, FIELD_LEN);
+            s_rotation[5].hero_is_gain = true;
+        } else {
+            snprintf(s_values[5].hero, FIELD_LEN, "%s",
+                     event_kind_label(e->last_kind));
+            s_rotation[5].hero_is_gain = false;
+        }
+
+        char age[16];
+        event_format_age(e->last_created, time(NULL), age, sizeof(age));
+        snprintf(s_values[5].subtitle, FIELD_LEN, "%s, %s",
+                 event_kind_label(e->last_kind), age);
+    }
 
     for (int i = 0; i < 6; i++) {
         s_rotation[i].hero = s_values[i].hero;
@@ -316,36 +374,149 @@ static void run_key_setup_mode(void)
  * polling layer.
  */
 #define REFRESH_INTERVAL_MS (10 * 60 * 1000)
+#define EVENTS_INTERVAL_MS  (60 * 1000)
+
+/*
+ * US Eastern. Spec 7.4 step 4: "today" must start at LOCAL midnight, or the
+ * New Paid screen rolls over mid-evening and reads zero for hours.
+ *
+ * POSIX TZ format, and note the sign convention is inverted from what you
+ * would expect -- EST5EDT means 5 hours WEST of UTC. The M3.2.0/M11.1.0 tail
+ * encodes US daylight saving (second Sunday in March to first Sunday in
+ * November), so the offset follows DST without firmware changes.
+ */
+#define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
+
+static freshness_t s_freshness;
+static bool s_time_synced = false;
+
+/*
+ * Local UTC offset right now, accounting for daylight saving.
+ *
+ * Derived by differencing local and UTC breakdowns of the same instant.
+ * ESP-IDF's newlib does not provide the BSD tm_gmtoff extension, and this
+ * also stays correct across DST transitions without a table.
+ */
+static int32_t current_utc_offset(void)
+{
+    const time_t now = time(NULL);
+
+    struct tm local = {0};
+    struct tm utc = {0};
+    localtime_r(&now, &local);
+    gmtime_r(&now, &utc);
+
+    int32_t diff = (int32_t)((local.tm_hour - utc.tm_hour) * 3600 +
+                             (local.tm_min - utc.tm_min) * 60);
+
+    /* Correct for the two calendars landing on different days. */
+    const int day_delta = local.tm_yday - utc.tm_yday;
+    if (day_delta == 1 || day_delta < -1) {
+        diff += 86400;      /* local is a day ahead (incl. year wrap) */
+    } else if (day_delta == -1 || day_delta > 1) {
+        diff -= 86400;      /* local is a day behind */
+    }
+
+    return diff;
+}
+
+static void sync_time(void)
+{
+    setenv("TZ", DEVICE_TZ, 1);
+    tzset();
+
+    esp_sntp_config_t cfg = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    if (esp_netif_sntp_init(&cfg) != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP init failed; \"today\" may be wrong");
+        return;
+    }
+
+    /* Without a correct clock, created[gte] is meaningless and the daily
+     * figures would be computed against an arbitrary epoch. Worth waiting
+     * for, but not worth blocking forever. */
+    if (esp_netif_sntp_sync_wait(pdMS_TO_TICKS(15000)) != ESP_OK) {
+        ESP_LOGW(TAG, "SNTP sync timed out; daily figures deferred");
+        return;
+    }
+
+    s_time_synced = true;
+
+    const time_t now = time(NULL);
+    struct tm local = {0};
+    localtime_r(&now, &local);
+    ESP_LOGI(TAG, "time synced: %04d-%02d-%02d %02d:%02d local (UTC%+d)",
+             local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+             local.tm_hour, local.tm_min, (int)(current_utc_offset() / 3600));
+}
 
 static void refresh_task(void *arg)
 {
     (void)arg;
 
-    /* Let WiFi associate before the first attempt. */
     vTaskDelay(pdMS_TO_TICKS(3000));
+    sync_time();
+
+    int64_t next_full_ms = 0;
 
     while (1) {
-        mrr_totals_t totals = {0};
-        bool truncated = false;
+        const int64_t now_ms = esp_timer_get_time() / 1000;
+        bool any_success = false;
 
-        const stripe_result_t r = stripe_fetch_totals(&totals, &truncated);
+        /* Full recompute: MRR comes only from real price objects, never from
+         * event payloads (see events.h for why). */
+        if (now_ms >= next_full_ms) {
+            mrr_totals_t totals = {0};
+            bool truncated = false;
+            const stripe_result_t r = stripe_fetch_totals(&totals, &truncated);
 
-        if (r == STRIPE_OK) {
-            lvgl_port_lock(0);
-            apply_totals(&totals, truncated);
-            lvgl_port_unlock();
-
-            /* Redraw immediately so the new value appears without waiting out
-             * the rotation interval. */
-            show_current("refresh");
-        } else {
-            /* Leave the previous values on screen rather than blanking them.
-             * Spec 7.4 wants staleness surfaced, which the stale screen will
-             * do properly once the polling layer lands. */
-            ESP_LOGW(TAG, "refresh failed: %s", stripe_result_str(r));
+            if (r == STRIPE_OK) {
+                lvgl_port_lock(0);
+                apply_totals(&totals, truncated);
+                lvgl_port_unlock();
+                any_success = true;
+                next_full_ms = now_ms + REFRESH_INTERVAL_MS;
+            } else {
+                ESP_LOGW(TAG, "full refresh failed: %s", stripe_result_str(r));
+            }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(REFRESH_INTERVAL_MS));
+        /* Events drive the daily figures and the heartbeat. Only meaningful
+         * once the clock is right (spec 7.4 step 4). */
+        if (s_time_synced) {
+            const int64_t day_start =
+                local_day_start_utc(time(NULL), current_utc_offset());
+
+            /*
+             * Ask Stripe for a week, but count only today.
+             *
+             * The daily figures reset at local midnight (spec 7.4 step 4),
+             * while the Last Event heartbeat needs something to show on a
+             * quiet day -- spec 6.1 wants it confirming the device is live
+             * without a status indicator, and a today-only window leaves it
+             * blank most mornings.
+             */
+            const int64_t lookback = day_start - (7 * 86400);
+
+            event_totals_t ev = {0};
+            if (stripe_fetch_events_since(lookback, day_start, &ev) == STRIPE_OK) {
+                lvgl_port_lock(0);
+                apply_events(&ev);
+                lvgl_port_unlock();
+                any_success = true;
+            }
+        }
+
+        if (any_success) {
+            freshness_mark_success(&s_freshness, now_ms);
+            show_current("refresh");
+        } else {
+            freshness_mark_failure(&s_freshness);
+        }
+
+        /* Back off after failures, otherwise poll events on their interval
+         * (spec 7.3, 7.4 step 3). */
+        const int64_t backoff = freshness_retry_delay_ms(&s_freshness);
+        vTaskDelay(pdMS_TO_TICKS(backoff > 0 ? backoff : EVENTS_INTERVAL_MS));
     }
 }
 
