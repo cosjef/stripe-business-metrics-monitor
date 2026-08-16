@@ -35,6 +35,7 @@
 #include "format.h"
 #include "events.h"
 #include "freshness.h"
+#include "rotation.h"
 
 #include "esp_netif_sntp.h"
 #include <time.h>
@@ -68,23 +69,62 @@ static const char *TAG = "main";
 static struct {
     char hero[FIELD_LEN];
     char subtitle[FIELD_LEN];
-} s_values[6];
+} s_values[SCREEN_COUNT];
 
-static screen_data_t s_rotation[] = {
-    { .label = "MRR",        .hero_is_gain = 0, .subtitle_is_gain = 1 },
-    { .label = "NEW PAID",   .hero_is_gain = 1, .subtitle_is_gain = 0 },
-    { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 1 },
-    { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
-    { .label = "LAST EVENT", .hero_is_gain = 1, .subtitle_is_gain = 0 },
+static int s_index = 0;
+static esp_timer_handle_t s_rotation_timer = NULL;
+
+/* Tracks how old the displayed data is, which drives State A (spec 6.2). */
+static freshness_t s_freshness;
+static bool s_time_synced = false;
+
+/* Indexed by screen_id_t. */
+static screen_data_t s_rotation[SCREEN_COUNT] = {
+    [SCREEN_MRR]        = { .label = "MRR",        .hero_is_gain = 0, .subtitle_is_gain = 1 },
+    [SCREEN_NEW_PAID]   = { .label = "NEW PAID",   .hero_is_gain = 1, .subtitle_is_gain = 0 },
+    [SCREEN_PAID_SUBS]  = { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 1 },
+    [SCREEN_TRIALS]     = { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_LAST_EVENT] = { .label = "LAST EVENT", .hero_is_gain = 1, .subtitle_is_gain = 0 },
+    [SCREEN_CHURN]      = { .label = "CHURN",      .hero_is_gain = 0, .subtitle_is_gain = 0 },
 };
+
+/*
+ * The screens currently worth showing. Rebuilt after every fetch, so an
+ * account that does not use trials never spends a rotation slot on a
+ * permanent zero (spec 6.1).
+ */
+static screen_id_t s_visible[SCREEN_COUNT];
+static int s_visible_count = 1;
+static rotation_state_t s_rot_state = {0};
+
+static void rebuild_rotation(void)
+{
+    const int n = rotation_build(&s_rot_state, s_visible);
+    if (n <= 0) {
+        /* rotation_build guarantees MRR, but never leave the device with
+         * nothing to show. */
+        s_visible[0] = SCREEN_MRR;
+        s_visible_count = 1;
+        return;
+    }
+
+    if (n != s_visible_count) {
+        ESP_LOGI(TAG, "rotation now %d screens", n);
+    }
+    s_visible_count = n;
+
+    if (s_index >= s_visible_count) {
+        s_index = 0;
+    }
+}
 
 /* Until the first fetch lands, show dashes rather than invented numbers.
  * Spec 1 principle 4: the device never lies, and a plausible-looking zero
  * would be a lie about an account that has not been read yet. */
 static void set_placeholders(void)
 {
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < SCREEN_COUNT; i++) {
         snprintf(s_values[i].hero, FIELD_LEN, "--");
         s_values[i].subtitle[0] = '\0';
         s_rotation[i].hero = s_values[i].hero;
@@ -95,45 +135,50 @@ static void set_placeholders(void)
 /* Populate the screens from a completed fetch. */
 static void apply_totals(const mrr_totals_t *t, bool truncated)
 {
-    format_money_compact(t->mrr_cents, s_values[0].hero, FIELD_LEN);
+    s_rot_state.have_data = true;
+    s_rot_state.trial_count = t->trial_count;
+
+    format_money_compact(t->mrr_cents, s_values[SCREEN_MRR].hero, FIELD_LEN);
     if (t->mixed_currency) {
         /* Do not present a sum across currencies as if it were one number. */
-        snprintf(s_values[0].subtitle, FIELD_LEN, "mixed currency");
+        snprintf(s_values[SCREEN_MRR].subtitle, FIELD_LEN, "mixed currency");
     } else if (truncated) {
-        snprintf(s_values[0].subtitle, FIELD_LEN, "partial");
+        snprintf(s_values[SCREEN_MRR].subtitle, FIELD_LEN, "partial");
     } else if (t->has_tiered) {
-        snprintf(s_values[0].subtitle, FIELD_LEN, "excl. usage plans");
+        snprintf(s_values[SCREEN_MRR].subtitle, FIELD_LEN, "excl. usage plans");
     } else {
         /* No subtitle in the normal case. The currency is not worth a line:
          * it never changes for a given account, and spec 5.1 gives the
          * subtitle to context that earns its place. Today's delta takes this
          * slot once the events endpoint lands. */
-        s_values[0].subtitle[0] = '\0';
+        s_values[SCREEN_MRR].subtitle[0] = '\0';
     }
 
     /* Today's deltas need the events endpoint, which lands with the polling
      * layer. Dashes rather than a fabricated zero. */
-    snprintf(s_values[1].hero, FIELD_LEN, "--");
-    snprintf(s_values[1].subtitle, FIELD_LEN, "needs events");
+    snprintf(s_values[SCREEN_NEW_PAID].hero, FIELD_LEN, "--");
+    snprintf(s_values[SCREEN_NEW_PAID].subtitle, FIELD_LEN, "needs events");
 
-    format_count(t->active_count, s_values[2].hero, FIELD_LEN);
-    snprintf(s_values[2].subtitle, FIELD_LEN, "active");
+    format_count(t->active_count, s_values[SCREEN_PAID_SUBS].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_PAID_SUBS].subtitle, FIELD_LEN, "active");
 
-    format_count(t->trial_count, s_values[3].hero, FIELD_LEN);
-    snprintf(s_values[3].subtitle, FIELD_LEN, "trialing");
+    format_count(t->trial_count, s_values[SCREEN_TRIALS].hero, FIELD_LEN);
+    snprintf(s_values[SCREEN_TRIALS].subtitle, FIELD_LEN, "trialing");
 
     /* Conversion needs 30 days of history; spec 6.1 also cautions it swings
      * wildly at low volume. */
-    snprintf(s_values[4].hero, FIELD_LEN, "--");
-    snprintf(s_values[4].subtitle, FIELD_LEN, "needs history");
+    snprintf(s_values[SCREEN_CONVERSION].hero, FIELD_LEN, "--");
+    snprintf(s_values[SCREEN_CONVERSION].subtitle, FIELD_LEN, "needs history");
 
-    snprintf(s_values[5].hero, FIELD_LEN, "--");
-    snprintf(s_values[5].subtitle, FIELD_LEN, "needs events");
+    snprintf(s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN, "--");
+    snprintf(s_values[SCREEN_LAST_EVENT].subtitle, FIELD_LEN, "needs events");
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < SCREEN_COUNT; i++) {
         s_rotation[i].hero = s_values[i].hero;
         s_rotation[i].subtitle = s_values[i].subtitle;
     }
+
+    rebuild_rotation();
 }
 
 /*
@@ -142,59 +187,65 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
  */
 static void apply_events(const event_totals_t *e)
 {
+    s_rot_state.churn_today = e->churned;
+    s_rot_state.have_last_event = e->have_last;
+
+    /* Churn enters rotation only when nonzero (spec 6.1). */
+    if (e->churned > 0) {
+        format_count(e->churned, s_values[SCREEN_CHURN].hero, FIELD_LEN);
+        snprintf(s_values[SCREEN_CHURN].subtitle, FIELD_LEN, "today");
+    }
+
     /* MRR subtitle: today's realized movement. Green, because spec 4.2
      * reserves green for realized positive movement and nothing else. */
     if (e->revenue_cents > 0) {
         char delta[FORMAT_MONEY_LEN];
         format_money_delta(e->revenue_cents, delta, sizeof(delta));
-        snprintf(s_values[0].subtitle, FIELD_LEN, "%s today", delta);
-        s_rotation[0].subtitle_is_gain = true;
+        snprintf(s_values[SCREEN_MRR].subtitle, FIELD_LEN, "%s today", delta);
+        s_rotation[SCREEN_MRR].subtitle_is_gain = true;
     }
 
     /* New paid today. */
-    format_count(e->new_paid, s_values[1].hero, FIELD_LEN);
+    format_count(e->new_paid, s_values[SCREEN_NEW_PAID].hero, FIELD_LEN);
     if (e->churned > 0) {
-        snprintf(s_values[1].subtitle, FIELD_LEN, "today, %d churned",
+        snprintf(s_values[SCREEN_NEW_PAID].subtitle, FIELD_LEN, "today, %d churned",
                  e->churned);
     } else {
-        snprintf(s_values[1].subtitle, FIELD_LEN, "today");
+        snprintf(s_values[SCREEN_NEW_PAID].subtitle, FIELD_LEN, "today");
     }
     /* Only green when something actually happened: a green zero would imply
      * a gain that did not occur. */
-    s_rotation[1].hero_is_gain = e->new_paid > 0;
+    s_rotation[SCREEN_NEW_PAID].hero_is_gain = e->new_paid > 0;
 
     /* The heartbeat. Confirms the device is live without a status indicator
      * (spec 6.1). */
     if (e->have_last) {
         if (e->last_amount_cents > 0) {
-            format_money_delta(e->last_amount_cents, s_values[5].hero, FIELD_LEN);
-            s_rotation[5].hero_is_gain = true;
+            format_money_delta(e->last_amount_cents, s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN);
+            s_rotation[SCREEN_LAST_EVENT].hero_is_gain = true;
         } else {
-            snprintf(s_values[5].hero, FIELD_LEN, "%s",
+            snprintf(s_values[SCREEN_LAST_EVENT].hero, FIELD_LEN, "%s",
                      event_kind_label(e->last_kind));
-            s_rotation[5].hero_is_gain = false;
+            s_rotation[SCREEN_LAST_EVENT].hero_is_gain = false;
         }
 
         char age[16];
         event_format_age(e->last_created, time(NULL), age, sizeof(age));
-        snprintf(s_values[5].subtitle, FIELD_LEN, "%s, %s",
+        snprintf(s_values[SCREEN_LAST_EVENT].subtitle, FIELD_LEN, "%s, %s",
                  event_kind_label(e->last_kind), age);
     }
 
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < SCREEN_COUNT; i++) {
         s_rotation[i].hero = s_values[i].hero;
         s_rotation[i].subtitle = s_values[i].subtitle;
     }
+
+    /* Last Event and Churn become visible only once events say so. */
+    rebuild_rotation();
 }
 
-#define ROTATION_COUNT ((int)(sizeof(s_rotation) / sizeof(s_rotation[0])))
 
-static int s_index = 0;
-static esp_timer_handle_t s_rotation_timer = NULL;
 
-/* Tracks how old the displayed data is, which drives State A (spec 6.2). */
-static freshness_t s_freshness;
-static bool s_time_synced = false;
 
 static void show_current(const char *why)
 {
@@ -211,6 +262,8 @@ static void show_current(const char *why)
      * Rotation continues underneath, so the label and value still change; what
      * changes is that every value is dimmed and the age is shown in amber.
      */
+    const screen_id_t id = s_visible[s_index];
+
     if (freshness_is_stale(&s_freshness, now_ms)) {
         const int64_t age = freshness_age_ms(&s_freshness, now_ms);
 
@@ -232,32 +285,32 @@ static void show_current(const char *why)
         }
 
         lvgl_port_lock(0);
-        screen_draw_stale(lv_screen_active(), s_rotation[s_index].label,
-                          s_rotation[s_index].hero, banner, footer);
+        screen_draw_stale(lv_screen_active(), s_rotation[id].label,
+                          s_rotation[id].hero, banner, footer);
         lvgl_port_unlock();
 
         ESP_LOGW(TAG, "[%d/%d] %s: '%s' STALE %s (%s)",
-                 s_index + 1, ROTATION_COUNT, s_rotation[s_index].label,
-                 s_rotation[s_index].hero, age_str, why);
+                 s_index + 1, s_visible_count, s_rotation[id].label,
+                 s_rotation[id].hero, age_str, why);
         return;
     }
 
-    screen_data_t d = s_rotation[s_index];
+    screen_data_t d = s_rotation[id];
     d.dot_index = s_index;
-    d.dot_count = ROTATION_COUNT;
+    d.dot_count = s_visible_count;
 
     lvgl_port_lock(0);
     screen_draw_rotation(lv_screen_active(), &d);
     lvgl_port_unlock();
 
     ESP_LOGI(TAG, "[%d/%d] %s: '%s' at %dpx (%s)",
-             s_index + 1, ROTATION_COUNT, d.label, d.hero,
+             s_index + 1, s_visible_count, d.label, d.hero,
              hero_size_for_text(d.hero), why);
 }
 
 static void advance(const char *why)
 {
-    s_index = (s_index + 1) % ROTATION_COUNT;
+    s_index = (s_index + 1) % s_visible_count;
     show_current(why);
 }
 
@@ -593,7 +646,7 @@ static void run_normal_mode(void)
                                              ROTATION_INTERVAL_MS * 1000));
 
     ESP_LOGI(TAG, "rotating %d screens every %dms",
-             ROTATION_COUNT, ROTATION_INTERVAL_MS);
+             s_visible_count, ROTATION_INTERVAL_MS);
 
     /* Tap-to-advance. A failure here is not fatal -- the device still
      * rotates on its own. */

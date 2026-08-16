@@ -33,7 +33,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
 CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
@@ -100,3 +100,6 @@ test_freshness: test_freshness.c ../main/freshness.c ../main/freshness.h
 
 test_events: test_events.c ../main/events.c ../main/events.h
 	$(CC) $(CFLAGS) -o $@ test_events.c ../main/events.c
+
+test_rotation: test_rotation.c ../main/rotation.c ../main/rotation.h
+	$(CC) $(CFLAGS) -o $@ test_rotation.c ../main/rotation.c
