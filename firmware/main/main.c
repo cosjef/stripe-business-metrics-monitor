@@ -154,6 +154,16 @@ static void show_setup_screen(void)
  */
 static bool on_stripe_key(const char *key, char *out_msg, size_t msg_len)
 {
+    /* This runs on the httpd task, which must have enough stack for the TLS
+     * handshake -- see cfg.stack_size in portal_start(). An earlier build
+     * overflowed it here and rebooted mid-request, which looked to the
+     * customer like the form doing nothing at all. Check the margin so a
+     * future regression reports itself instead of crashing. */
+    const UBaseType_t headroom = uxTaskGetStackHighWaterMark(NULL);
+    if (headroom < 2048) {
+        ESP_LOGW(TAG, "low stack before TLS: %u bytes free", (unsigned)headroom);
+    }
+
     stripe_set_key(key);
     const stripe_validation_t v = stripe_validate_key();
 

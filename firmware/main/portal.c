@@ -420,6 +420,13 @@ esp_err_t portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key,
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
+    /*
+     * The default httpd stack (4KB) is not enough to run a TLS handshake
+     * inside a request handler: validating a Stripe key overflowed it and
+     * rebooted the device mid-request, so the customer saw the form simply do
+     * nothing. mbedTLS needs several KB of its own on top of the handler.
+     */
+    cfg.stack_size = 12288;
     /* Needed for the catch-all redirect, which is what makes phones open the
      * page without the customer typing an address. */
     cfg.uri_match_fn = httpd_uri_match_wildcard;
