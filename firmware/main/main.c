@@ -104,9 +104,18 @@ static int s_auth_status = 0;
 
 /* Indexed by screen_id_t. */
 static screen_data_t s_rotation[SCREEN_COUNT] = {
-    [SCREEN_MRR]        = { .label = "MRR",        .hero_is_gain = 0, .subtitle_is_gain = 1 },
-    [SCREEN_NEW_PAID]   = { .label = "NEW PAID",   .hero_is_gain = 1, .subtitle_is_gain = 0 },
-    [SCREEN_PAID_SUBS]  = { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 1 },
+    /*
+     * Green means exactly one thing: realized positive movement (spec 4.2).
+     * "If everything is green, green means nothing."
+     *
+     * So these default to OFF, and the few screens that earn green switch it
+     * on per-refresh once they know the value is actually a gain.
+     */
+    [SCREEN_MRR]        = { .label = "MRR",        .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    [SCREEN_NEW_PAID]   = { .label = "NEW PAID",   .hero_is_gain = 0, .subtitle_is_gain = 0 },
+    /* "active" is a static label, not a gain -- it was green from when the
+     * subtitle read "+7 this month". */
+    [SCREEN_PAID_SUBS]  = { .label = "PAID SUBS",  .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_TRIALS]     = { .label = "TRIALS",     .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CONVERSION] = { .label = "CONVERSION", .hero_is_gain = 0, .subtitle_is_gain = 0 },
     [SCREEN_CANCELLATIONS] = { .label = "CANCELLED", .hero_is_gain = 0, .subtitle_is_gain = 0 },
@@ -261,6 +270,10 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
     s_last_totals = *t;
 
     format_money_compact(t->mrr_cents, s_values[SCREEN_MRR].hero, FIELD_LEN);
+    /* Warnings are never green: they qualify the number rather than
+     * celebrate it. */
+    s_rotation[SCREEN_MRR].subtitle_is_gain = false;
+
     if (t->mixed_currency) {
         /* Do not present a sum across currencies as if it were one number. */
         snprintf(s_values[SCREEN_MRR].subtitle, FIELD_LEN, "mixed currency");
