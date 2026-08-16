@@ -97,7 +97,11 @@ static void apply_totals(const mrr_totals_t *t, bool truncated)
     } else if (t->has_tiered) {
         snprintf(s_values[0].subtitle, FIELD_LEN, "excl. usage plans");
     } else {
-        snprintf(s_values[0].subtitle, FIELD_LEN, "%s", t->currency);
+        /* No subtitle in the normal case. The currency is not worth a line:
+         * it never changes for a given account, and spec 5.1 gives the
+         * subtitle to context that earns its place. Today's delta takes this
+         * slot once the events endpoint lands. */
+        s_values[0].subtitle[0] = '\0';
     }
 
     /* Today's deltas need the events endpoint, which lands with the polling
