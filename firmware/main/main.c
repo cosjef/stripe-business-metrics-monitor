@@ -192,8 +192,56 @@ static void apply_events(const event_totals_t *e)
 static int s_index = 0;
 static esp_timer_handle_t s_rotation_timer = NULL;
 
+/* Tracks how old the displayed data is, which drives State A (spec 6.2). */
+static freshness_t s_freshness;
+static bool s_time_synced = false;
+
 static void show_current(const char *why)
 {
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+
+    /*
+     * State A: stale (spec 6.2).
+     *
+     * The most important screen in the deck -- "a confidently displayed stale
+     * number is worse than an obviously stale one, and most cheap dashboards
+     * fail exactly here by freezing on a four-hour-old figure with no
+     * indication."
+     *
+     * Rotation continues underneath, so the label and value still change; what
+     * changes is that every value is dimmed and the age is shown in amber.
+     */
+    if (freshness_is_stale(&s_freshness, now_ms)) {
+        const int64_t age = freshness_age_ms(&s_freshness, now_ms);
+
+        char age_str[24];
+        freshness_format_age(age, age_str, sizeof(age_str));
+
+        char banner[40];
+        snprintf(banner, sizeof(banner), "stale | %s", age_str);
+
+        /* The retry status belongs in the footer so the reader knows the
+         * device is still trying rather than given up. */
+        char footer[32];
+        const int64_t delay = freshness_retry_delay_ms(&s_freshness);
+        if (delay > 0) {
+            snprintf(footer, sizeof(footer), "retry in %ds",
+                     (int)(delay / 1000));
+        } else {
+            snprintf(footer, sizeof(footer), "retrying");
+        }
+
+        lvgl_port_lock(0);
+        screen_draw_stale(lv_screen_active(), s_rotation[s_index].label,
+                          s_rotation[s_index].hero, banner, footer);
+        lvgl_port_unlock();
+
+        ESP_LOGW(TAG, "[%d/%d] %s: '%s' STALE %s (%s)",
+                 s_index + 1, ROTATION_COUNT, s_rotation[s_index].label,
+                 s_rotation[s_index].hero, age_str, why);
+        return;
+    }
+
     screen_data_t d = s_rotation[s_index];
     d.dot_index = s_index;
     d.dot_count = ROTATION_COUNT;
@@ -387,8 +435,6 @@ static void run_key_setup_mode(void)
  */
 #define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
 
-static freshness_t s_freshness;
-static bool s_time_synced = false;
 
 /*
  * Local UTC offset right now, accounting for daylight saving.
@@ -534,6 +580,7 @@ static void run_normal_mode(void)
     ESP_ERROR_CHECK(wifi_init());
     ESP_ERROR_CHECK(wifi_start_sta(ssid, pass));
 
+    freshness_init(&s_freshness);
     set_placeholders();
     show_current("boot");
 

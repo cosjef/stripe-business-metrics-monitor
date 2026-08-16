@@ -40,6 +40,7 @@ typedef struct {
     char *buf;
     size_t len;
     size_t cap;
+    bool overflowed;
 } response_t;
 
 const char *stripe_result_str(stripe_result_t r)
@@ -84,7 +85,13 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
     /* Truncate rather than overflow. A truncated body fails to parse, which
      * surfaces as BAD_RESPONSE -- an honest error, unlike a smashed heap. */
     if (r->len + evt->data_len >= r->cap) {
-        ESP_LOGW(TAG, "response exceeded %u bytes, truncating", (unsigned)r->cap);
+        /* Log once, not once per chunk: a truncating response fires this
+         * callback hundreds of times and floods the console. */
+        if (!r->overflowed) {
+            r->overflowed = true;
+            ESP_LOGW(TAG, "response exceeded %u bytes, truncating",
+                     (unsigned)r->cap);
+        }
         return ESP_OK;
     }
 
@@ -303,9 +310,17 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
     return STRIPE_OK;
 }
 
-/* Events are small: limit=100 of them is a few tens of KB. */
-#define EVENTS_BUF_LEN (128 * 1024)
-#define MAX_EVENTS 100
+/*
+ * Events are NOT small. Each one embeds a full object snapshot, so 100
+ * subscription events ran past 128KB on a real account and the truncated body
+ * failed to parse -- which left the heartbeat blank with no obvious cause.
+ *
+ * 25 events is plenty: the daily counts come from today's activity and the
+ * heartbeat only needs the most recent one. Fewer events also means a much
+ * smaller response to pull every 60 seconds.
+ */
+#define EVENTS_BUF_LEN (256 * 1024)
+#define MAX_EVENTS 25
 
 stripe_result_t stripe_fetch_events(int64_t since_utc, event_totals_t *out)
 {
@@ -427,8 +442,16 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
 
     *out = events_summarize(parsed, n, day_start_utc);
 
-    ESP_LOGI(TAG, "events: HTTP %d, %d parsed, %d new paid today",
-             status, n, out->new_paid);
+    ESP_LOGI(TAG, "events: HTTP %d, %d parsed, %d new paid today, last=%s",
+             status, n, out->new_paid,
+             out->have_last ? event_kind_label(out->last_kind) : "(none)");
+
+    /* Which types actually came back, so an empty heartbeat can be
+     * distinguished from a classification problem. */
+    for (int i = 0; i < n && i < 5; i++) {
+        ESP_LOGI(TAG, "  event[%d] kind=%d created=%lld", i,
+                 (int)parsed[i].kind, (long long)parsed[i].created);
+    }
 
     return STRIPE_OK;
 }
