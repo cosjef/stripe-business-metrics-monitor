@@ -64,6 +64,12 @@ static const char *TAG = "main";
 #define FORCE_STALE_AFTER_S 0
 
 /*
+ * TEMPORARY: force State B after this many seconds, to verify the auth-error
+ * screen renders on hardware without revoking a live key. 0 disables.
+ */
+#define FORCE_AUTH_FAIL_AFTER_S 0
+
+/*
  * Screen contents, refreshed from Stripe (spec 7.1, 7.2).
  *
  * The strings are owned here rather than by the screen code, so a refresh can
@@ -84,6 +90,16 @@ static esp_timer_handle_t s_rotation_timer = NULL;
 /* Tracks how old the displayed data is, which drives State A (spec 6.2). */
 static freshness_t s_freshness;
 static bool s_time_synced = false;
+
+/*
+ * Set when Stripe rejects the key (spec 7.4 step 5, 6.2 State B).
+ *
+ * A revoked or rescoped key never recovers on its own, so this must be shown
+ * rather than left to look like a network problem. Showing a stale MRR when
+ * the real fault is authentication sends the reader to debug the wrong thing.
+ */
+static volatile bool s_auth_failed = false;
+static int s_auth_status = 0;
 
 /* Indexed by screen_id_t. */
 static screen_data_t s_rotation[SCREEN_COUNT] = {
@@ -396,6 +412,32 @@ static void show_current(const char *why)
      */
     const screen_id_t id = s_visible[s_index];
 
+    /*
+     * State B outranks State A. Stale means "this number is old"; an auth
+     * failure means "there will be no more numbers until you act". The second
+     * is the more useful thing to say.
+     */
+#if FORCE_AUTH_FAIL_AFTER_S
+    if (now_ms > FORCE_AUTH_FAIL_AFTER_S * 1000) {
+        s_auth_failed = true;
+        s_auth_status = 401;
+    }
+#endif
+
+    if (s_auth_failed) {
+        char errcode[24];
+        snprintf(errcode, sizeof(errcode), "err %d", s_auth_status);
+
+        lvgl_port_lock(0);
+        screen_draw_auth_error(lv_screen_active(), "Stripe key", "rejected",
+                               "check permissions", errcode);
+        lvgl_port_unlock();
+
+        ESP_LOGE(TAG, "AUTH FAILED (HTTP %d) -- key rejected (%s)",
+                 s_auth_status, why);
+        return;
+    }
+
     bool stale = freshness_is_stale(&s_freshness, now_ms);
 #if FORCE_STALE_AFTER_S
     if (now_ms > FORCE_STALE_AFTER_S * 1000) {
@@ -693,11 +735,21 @@ static void refresh_task(void *arg)
             const stripe_result_t r = stripe_fetch_totals(&totals, &truncated);
 
             if (r == STRIPE_OK) {
+                /* A working fetch clears the auth state: the key may have
+                 * been re-issued with the same value, or scope restored. */
+                s_auth_failed = false;
+
                 lvgl_port_lock(0);
                 apply_totals(&totals, truncated);
                 lvgl_port_unlock();
                 any_success = true;
                 next_full_ms = now_ms + REFRESH_INTERVAL_MS;
+            } else if (r == STRIPE_ERR_UNAUTHORIZED) {
+                /* Not retryable: a revoked key stays revoked. Surface it and
+                 * stop pretending the data is merely late. */
+                s_auth_failed = true;
+                s_auth_status = 401;
+                show_current("auth");
             } else {
                 ESP_LOGW(TAG, "full refresh failed: %s", stripe_result_str(r));
             }
