@@ -55,6 +55,45 @@ static void test_small_amounts(void)
     money(2950, b);    check_str("$29.50 rounds down", b, "$29");
 }
 
+/*
+ * The decimal is dropped once it would cost a hero size step.
+ *
+ * "$11.2k" is six glyphs and needs 268px at 96px -- well past the 208px column,
+ * so the sizer falls to 64px while every neighbouring screen sits at 96px. The
+ * ARR screen looked conspicuously small on the device for exactly this reason.
+ *
+ * "$11k" is four glyphs, fits at 96px, and matches the rest of the deck. The
+ * lost precision is not real precision: ARR is MRR x 12, a projection, and the
+ * exact figure is always derivable from the MRR screen.
+ *
+ * The rule already existed at 100k for this same reason (spec 2.2); the
+ * threshold was simply set too high for this column width.
+ */
+static void test_decimal_dropped_when_it_costs_a_size_step(void)
+{
+    printf("decimal dropped above $10k so the hero stays at full size\n");
+
+    char b[FORMAT_MONEY_LEN];
+
+    /* The case from the device: ARR on a $970/mo account. */
+    money(1164396, b);  check_str("$11,643.96 -> $11k", b, "$11k");
+    money(1120000, b);  check_str("$11,200 -> $11k", b, "$11k");
+
+    /* Below the threshold the decimal still earns its place: "$9.4k" is five
+     * glyphs and fits at 88px, close enough to its neighbours. */
+    money(940000, b);   check_str("$9,400 keeps its decimal", b, "$9.4k");
+    money(999900, b);   check_str("just under $10k keeps it", b, "$9.9k");
+
+    /* The boundary itself. */
+    money(1000000, b);  check_str("exactly $10k drops it", b, "$10k");
+
+    /* And the size step this is all in service of. */
+    check_true("$11k renders at full hero size",
+               hero_size_for_text("$11k") == SIZE_HERO_MAX);
+    check_true("$11.2k would not have",
+               hero_size_for_text("$11.2k") < SIZE_HERO_MAX);
+}
+
 static void test_thousands(void)
 {
     printf("thousands abbreviate with one decimal (spec 6.1)\n");
@@ -62,10 +101,14 @@ static void test_thousands(void)
     char b[FORMAT_MONEY_LEN];
     money(100000, b);   check_str("$1000 -> $1.0k", b, "$1.0k");
     money(651200, b);   check_str("the spec's example", b, "$6.5k");
-    money(1234500, b);  check_str("$12,345 -> $12.3k", b, "$12.3k");
+    /* Above $10k the decimal is dropped so the hero keeps its full size --
+     * see test_decimal_dropped_when_it_costs_a_size_step. */
+    money(1234500, b);  check_str("$12,345 -> $12k", b, "$12k");
     /* $99,999 is NOT $100k. Rounding up would overstate revenue, which a
-     * display whose whole point is honesty must never do. */
-    money(9999900, b);  check_str("$99,999 stays under 100k", b, "$99.9k");
+     * display whose whole point is honesty must never do. Truncation, not
+     * rounding, is what guarantees that -- and it still holds without the
+     * decimal. */
+    money(9999900, b);  check_str("$99,999 stays under 100k", b, "$99k");
     money(10000000, b); check_str("$100,000 -> $100k", b, "$100k");
     money(14500000, b); check_str("$145,000 -> $145k", b, "$145k");
 }
@@ -170,6 +213,7 @@ int main(void)
 
     test_small_amounts();
     test_thousands();
+    test_decimal_dropped_when_it_costs_a_size_step();
     test_millions();
     test_negative();
     test_output_fits_the_column();

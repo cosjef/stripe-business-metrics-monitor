@@ -32,5 +32,20 @@ typedef struct {
  */
 display_orientation_t display_orientation(int degrees);
 
-/* The orientation this enclosure ships with: USB-C at the bottom. */
-#define DISPLAY_ROTATION_DEGREES 180
+/*
+ * Next angle in the cycle: 0 -> 90 -> 180 -> 270 -> 0. Anything unsupported
+ * restarts at 0.
+ *
+ * Backs the button-driven orientation picker. The USB-C port sits on the side
+ * of this enclosure, and which quarter turn puts the text upright is a fact
+ * about the physical case -- faster to settle by eye than to derive.
+ */
+int display_orientation_next(int degrees);
+
+/*
+ * The orientation this enclosure ships with.
+ *
+ * The port is on the side, so this is a quarter turn. Confirmed on glass:
+ * a half turn left the text rotated relative to the case.
+ */
+#define DISPLAY_ROTATION_DEGREES 90

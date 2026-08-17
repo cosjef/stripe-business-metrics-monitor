@@ -29,9 +29,20 @@ void format_money_compact(int64_t cents, char *out, size_t out_len)
         const int64_t k_whole = dollars / 1000;
         const int64_t k_tenth = (dollars % 1000) / 100;
 
-        /* Past 100k a decimal buys nothing at a glance and costs a glyph,
-         * which can drop the hero a whole size step (spec 2.2). */
-        if (k_whole >= 100) {
+        /*
+         * Past 10k the decimal costs a hero size step, so it is dropped.
+         *
+         * "$11.2k" is six glyphs needing 268px at 96px, well past the 208px
+         * column, so the sizer falls to 64px while every neighbouring screen
+         * sits at 96px -- the ARR screen looked visibly small on the device for
+         * exactly this reason. "$11k" fits at 96px and matches the deck.
+         *
+         * The precision is not really lost: figures this size are projections
+         * (ARR is MRR x 12), and the exact value is on the MRR screen. Spec 2.2
+         * already called for this tradeoff; the threshold was just set too high
+         * for this column width.
+         */
+        if (k_whole >= 10) {
             snprintf(out, out_len, "%s$%" PRId64 "k", sign, k_whole);
         } else {
             snprintf(out, out_len, "%s$%" PRId64 ".%" PRId64 "k",

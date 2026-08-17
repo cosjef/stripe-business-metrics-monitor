@@ -21,6 +21,7 @@ lv_display_t *display_handle(void)
     return s_lvgl_disp;
 }
 
+
 void display_backlight(_Bool on)
 {
     gpio_set_level(LCD_GPIO_BL, on ? LCD_BL_ON_LEVEL : !LCD_BL_ON_LEVEL);

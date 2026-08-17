@@ -129,6 +129,82 @@ static void test_unsupported_angles_fall_back(void)
     }
 }
 
+/*
+ * All four orientations must be distinct.
+ *
+ * The enclosure turned out to put the USB-C port on the side rather than the
+ * bottom, so the needed rotation is a quarter turn, and which quarter is a
+ * question about the physical case that no host test can answer. What the test
+ * can guarantee is that cycling through the four lands on four genuinely
+ * different configurations -- if two collide, a cycle would appear to skip and
+ * the right one might never be reachable.
+ */
+static void test_all_four_are_distinct(void)
+{
+    printf("the four orientations are all distinct\n");
+
+    const int angles[] = {0, 90, 180, 270};
+    display_orientation_t o[4];
+
+    for (int i = 0; i < 4; i++) {
+        o[i] = display_orientation(angles[i]);
+    }
+
+    for (int i = 0; i < 4; i++) {
+        for (int j = i + 1; j < 4; j++) {
+            checks++;
+            if (o[i].swap_xy == o[j].swap_xy &&
+                o[i].mirror_x == o[j].mirror_x &&
+                o[i].mirror_y == o[j].mirror_y) {
+                failures++;
+                printf("  FAIL %d and %d degrees are identical\n",
+                       angles[i], angles[j]);
+            }
+        }
+    }
+}
+
+/*
+ * Cycling steps through the four in order and wraps. This backs the
+ * button-driven orientation picker: with the port on the side, the correct
+ * quarter turn is faster to find by eye than to derive.
+ */
+static void test_cycle_wraps(void)
+{
+    printf("cycling steps 0 -> 90 -> 180 -> 270 -> 0\n");
+
+    checks++;
+    if (display_orientation_next(0) != 90) {
+        failures++;
+        printf("  FAIL 0 should advance to 90\n");
+    }
+
+    checks++;
+    if (display_orientation_next(90) != 180) {
+        failures++;
+        printf("  FAIL 90 should advance to 180\n");
+    }
+
+    checks++;
+    if (display_orientation_next(180) != 270) {
+        failures++;
+        printf("  FAIL 180 should advance to 270\n");
+    }
+
+    checks++;
+    if (display_orientation_next(270) != 0) {
+        failures++;
+        printf("  FAIL 270 should wrap to 0\n");
+    }
+
+    /* An unsupported angle restarts the cycle rather than sticking. */
+    checks++;
+    if (display_orientation_next(45) != 0) {
+        failures++;
+        printf("  FAIL an invalid angle should restart at 0\n");
+    }
+}
+
 int main(void)
 {
     test_0_degrees();
@@ -136,6 +212,8 @@ int main(void)
     test_180_inverts_0();
     test_quarter_turns_transpose();
     test_unsupported_angles_fall_back();
+    test_all_four_are_distinct();
+    test_cycle_wraps();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

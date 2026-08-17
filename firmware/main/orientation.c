@@ -30,3 +30,14 @@ display_orientation_t display_orientation(int degrees)
         };
     }
 }
+
+int display_orientation_next(int degrees)
+{
+    switch (degrees) {
+    case 0:   return 90;
+    case 90:  return 180;
+    case 180: return 270;
+    case 270: return 0;
+    default:  return 0;
+    }
+}
