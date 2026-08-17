@@ -1,4 +1,6 @@
 #include "display.h"
+
+#include "orientation.h"
 #include "board_config.h"
 
 #include "esp_check.h"
@@ -104,6 +106,9 @@ static esp_err_t lvgl_init(void)
     };
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "LVGL port init failed");
 
+    const display_orientation_t orient =
+        display_orientation(DISPLAY_ROTATION_DEGREES);
+
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = s_lcd_io,
         .panel_handle = s_lcd_panel,
@@ -113,10 +118,18 @@ static esp_err_t lvgl_init(void)
         .vres = LCD_V_RES,
         .monochrome = false,
         .color_format = LV_COLOR_FORMAT_RGB565,
+        /*
+         * The enclosure puts the USB-C port at the bottom, opposite the panel's
+         * native scan order, so the image needs a half turn. Values come from
+         * orientation.c rather than being written inline, so the intent is
+         * asserted on the host -- swapping the axes here instead of mirroring
+         * them transposes to landscape, which on a square panel looks plausible
+         * enough to ship by accident.
+         */
         .rotation = {
-            .swap_xy = false,
-            .mirror_x = false,
-            .mirror_y = false,
+            .swap_xy = orient.swap_xy,
+            .mirror_x = orient.mirror_x,
+            .mirror_y = orient.mirror_y,
         },
         .flags = {
             .buff_dma = true,
