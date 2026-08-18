@@ -12,11 +12,29 @@ that shaped the current design, and adds one that is harder than it looks.
 
 ---
 
-## The headline: one hard constraint, two freed ones
+## Connectivity is unchanged: WiFi
+
+The C6 adds WiFi 6, Bluetooth 5 and 802.15.4 (Thread/Zigbee), but the
+transport for this device does not change. The Stripe API is HTTPS over
+TCP/IP, and Bluetooth connects to a nearby phone, not to the internet. Using
+BLE would mean a phone relaying every request — adding a dependency on your
+phone being present and running an app, to a device whose value is sitting on
+a desk working unattended.
+
+The one place BLE is genuinely attractive is **provisioning**: replacing the
+captive portal with BLE setup is a nicer first-run experience and is well
+supported (`esp_wifi_provisioning`). Worth considering later; it changes setup
+only, not how data is fetched.
+
+Thread/Zigbee are for mesh sensor networks and have no path to `api.stripe.com`.
+
+---
+
+## The headline: what actually changes
 
 | | S3 (current) | C6 (new) | Consequence |
 |---|---|---|---|
-| PSRAM | 8MB | **none** | **Hard.** Full-buffer JSON parsing is impossible. Must stream. |
+| PSRAM | 8MB | **none** | 912KB of buffers must shrink. Pagination handles it; see C2. |
 | SRAM | 512KB + PSRAM | 512KB total | Everything competes for one pool |
 | Display | 240x240 IPS | 480x480 AMOLED | 4x pixels; true black; bigger type |
 | Black | `#000000` forced | `#121211` viable | The spec's original choice becomes correct |
@@ -51,10 +69,11 @@ precedence, the cache format and the money formatter all move over as source
 files with no edits. That is the bulk of the thinking in this project, and it
 is safe.
 
-Two caveats on "no edits". `screens.c` depends on LVGL (fine — LVGL 9.5.0 runs
-on both) and `stripe_parse.c` depends on cJSON, which Stage C2 rewrites. So
-`stripe_parse.c` is the one file in the portable list whose *implementation*
-changes; its 48 tests are what pin the behaviour through that rewrite.
+One caveat on "no edits": `screens.c` depends on LVGL and `stripe_parse.c` on
+cJSON. Neither is ESP-IDF and both run on the C6 — LVGL 9.5.0 is the version
+Waveshare's own example uses, and cJSON is portable C. Under the pagination
+approach in Stage C2, `stripe_parse.c` genuinely does not change: a page of 10
+subscriptions has the same JSON shape as a page of 100.
 
 ---
 
@@ -107,69 +126,79 @@ building `colortest.c`. Build that first this time, not fifth.
 
 ---
 
-## Stage C2 — Streaming JSON (the hard one)
+## Stage C2 — Fitting the fetch into 512KB
 
-**This is the only part of the port that is genuinely difficult**, and it
-should be done first because everything else is downstream of whether it works.
+**Corrected 2026-08-18.** An earlier version of this plan called a streaming
+JSON parser mandatory and "the only part that is genuinely difficult". That
+was wrong. Pagination solves the same problem with far less risk, and it is
+the recommended approach.
 
-Current allocation (the three large buffers in PSRAM; the 16KB validate
-buffer is a plain `malloc` in internal RAM):
+### The actual numbers
 
 ```
-subscriptions  512 KB
-events         256 KB
-invoices       128 KB
-validate        16 KB
-              -------
-               912 KB
+raw JSON buffered today   512 KB   (subscriptions, limit=100)
+data we retain from it     25 KB   (stripe_subs_t, 128 x 40 bytes)
+                          ------
+ratio                      ~20x more raw JSON than kept data
 ```
 
-Available on the C6 after WiFi (~50KB), mbedTLS (~45KB), FreeRTOS + IDF
-baseline (~40KB), LVGL heap (~64KB), app static/bss (~25KB) and two 60-line
-draw buffers (~112KB): **roughly 175KB, and that is optimistic.**
+Per subscription we extract eight fields — `unit_amount`, `quantity`,
+`interval`, `interval_count`, `recurring`, `tiered`, `currency`, and the
+discount — into 40 bytes. The 512KB exists only because we ask Stripe for 100
+subscriptions at once and each expanded object is 3-4KB of JSON.
 
-912KB does not fit in 175KB. There is no configuration that makes it fit.
+### Option A — pagination (recommended)
 
-**Approach:** replace `cJSON_Parse` of a whole response with a streaming
-SAX-style parse that accumulates only the running totals. We never needed the
-full document — `mrr.c` walks subscriptions once and sums. The full-buffer
-approach was chosen in Stage 5 *because* PSRAM made it free, and that
-justification is now gone.
+Ask for fewer subscriptions per request and follow `has_more`.
 
-- [ ] Add a streaming JSON tokenizer (`jsmn` is ~600 lines, MIT, no malloc;
-      or hand-rolled — the Stripe shapes we consume are shallow and known)
-- [ ] Rewrite `stripe_api.c` fetch path to parse incrementally from the
-      `esp_http_client` read callback, never buffering the full body
-- [ ] Keep `stripe_parse.c`'s *semantics* — its 48 tests define what correct
-      parsing means and must still pass. This is a rewrite of *how* bytes
-      arrive, not *what* they mean.
-- [ ] Cap Stripe page size (`limit=100` -> smaller) if per-item state proves
-      too large; paginate rather than buffer
+```
+limit=100  ->  ~350 KB buffer    2 pages
+limit=25   ->   ~88 KB buffer    6 pages
+limit=10   ->   ~35 KB buffer   13 pages
+```
 
-**Test-first, and the tests already exist.** `test_stripe_parse` (48 checks)
-and `test_mrr` (58 checks) assert the outcome. A streaming parser that passes
-both is correct by the definition we already committed to. Write a
-fixture-driven test that feeds the same JSON in arbitrary chunk boundaries —
-that is where streaming parsers actually break.
+At `limit=10` the buffer is ~35KB, which fits the C6 comfortably.
 
-**Risk:** this is the item most likely to overrun. If streaming proves
-unexpectedly hard, the fallback is fetching fewer subscriptions per page and
-accepting more round trips — slower, but it fits.
+What makes this cheap: **`stripe_parse.c` does not change at all.** It already
+parses `has_more` (line 128) and that is already covered by
+`test_stripe_parse`'s `test_has_more`. Its 48 tests keep passing untouched,
+because the shape of a page response is identical regardless of how many
+items it holds. The new code is a fetch loop plus a `starting_after` cursor —
+on the order of 40 lines, in `stripe_api.c` only.
 
----
+Cost: roughly 13 HTTP round trips per full refresh instead of 2. TLS is
+already established, so each is ~100-200ms — about 2 seconds added to a
+refresh that runs every 10 minutes.
 
-### Flash budget: not a constraint
+### Option B — streaming parse
 
-Worth stating plainly, because an earlier draft got this wrong. The C6 has
-**16MB of external flash**. The 6MB figure in this plan is our *own*
-`partitions.csv` choice (Waveshare's example splits 6M app + 3M spiffs) —
-neither is imposed by the chip. Fixed overhead is about 64KB (bootloader,
-partition table, nvs, phy_init), so **~15.9MB is available to allocate** as we
-see fit.
+Parse incrementally from the HTTP read callback and never buffer a full body.
+Gets the buffer to ~4KB. Requires replacing cJSON with a tokenizer and
+rewriting `stripe_parse.c`, whose 48 tests define the behaviour that rewrite
+must preserve. Chunk-boundary handling is the classic failure mode and is
+fiddly to get right.
 
-Current usage: a 1.84MB binary in a 6M partition, 30% full. Even doubling
-every font (see C3) lands around 3.6MB. If we ever want OTA, a 6M+6M dual-app
-layout still fits. Nothing here is tight.
+**Not needed.** Keep it in reserve only if pagination somehow proves
+insufficient, which the arithmetic above says it will not.
+
+### This is worth doing on the S3 too
+
+Today `has_more` is surfaced but never followed: `stripe_api.c` contains no
+`starting_after`. An account with more than 100 subscriptions gets its MRR
+computed from the first 100 only.
+
+The failure is handled honestly rather than silently — `main.c` renders
+"partial" as the MRR subtitle when `truncated` is set — so this is a stated
+limitation, not a wrong number. But it is still a ceiling, and pagination
+removes it. **Recommend implementing pagination on `main` for the S3 first,
+then it ports to the C6 for free as a buffer-size change.**
+
+- [ ] Add `starting_after` cursor and a fetch loop in `stripe_api.c`
+- [ ] Test: multi-page fixture where page 2 completes the total, asserting
+      the summed MRR matches a single-page fixture of the same subscriptions
+- [ ] Test: `has_more` true but next page empty (Stripe edge case)
+- [ ] Reduce `SUBS_BUF_LEN` once pagination lands; same for events/invoices
+- [ ] Retire the "partial" subtitle once truncation is no longer reachable
 
 ---
 
@@ -298,7 +327,7 @@ could sink the port, so it comes before anything cosmetic.
 
 | Order | Stage | Why here | Needs hardware? |
 |---|---|---|---|
-| 1 | **C2 streaming JSON** | The only true blocker. Everything else assumes it works. | **No** — testable on host today |
+| 1 | **C2 pagination** | Removes the PSRAM dependency, and fixes a real >100-subscription ceiling on the S3 as well | **No** — testable on host today |
 | 2 | C3 layout maths | Pure logic + tests; no device needed | No |
 | 3 | C1 board bring-up | First thing on arrival; build colortest *first* | Yes |
 | 4 | C4 colour | Needs the ramp diagnostic on real glass | Yes |
