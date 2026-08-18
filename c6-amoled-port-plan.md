@@ -137,15 +137,20 @@ the recommended approach.
 
 ```
 raw JSON buffered today   512 KB   (subscriptions, limit=100)
-data we retain from it     25 KB   (stripe_subs_t, 128 x 40 bytes)
+data we retain from it     25 KB   (sizeof(stripe_subs_t) = 25,616 bytes)
                           ------
 ratio                      ~20x more raw JSON than kept data
 ```
 
-Per subscription we extract eight fields — `unit_amount`, `quantity`,
-`interval`, `interval_count`, `recurring`, `tiered`, `currency`, and the
-discount — into 40 bytes. The 512KB exists only because we ask Stripe for 100
-subscriptions at once and each expanded object is 3-4KB of JSON.
+The retained 25KB is `items[512]` at 40 bytes each (20,480) plus `subs[128]`
+at 40 bytes each (5,120), plus scalars. Each `mrr_item_t` holds the eight
+fields we actually use — `unit_amount`, `quantity`, `interval`,
+`interval_count`, `recurring`, `tiered`, `currency`, and the discount — in 40
+bytes.
+
+The 512KB exists only because we ask Stripe for 100 subscriptions at once and
+each expanded object is 3-4KB of JSON. It is sized for the wire format, not
+for what we keep.
 
 ### Option A — pagination (recommended)
 
@@ -181,7 +186,7 @@ fiddly to get right.
 **Not needed.** Keep it in reserve only if pagination somehow proves
 insufficient, which the arithmetic above says it will not.
 
-### This is worth doing on the S3 too
+### The S3 has the same ceiling (deferred)
 
 Today `has_more` is surfaced but never followed: `stripe_api.c` contains no
 `starting_after`. An account with more than 100 subscriptions gets its MRR
@@ -190,15 +195,40 @@ computed from the first 100 only.
 The failure is handled honestly rather than silently — `main.c` renders
 "partial" as the MRR subtitle when `truncated` is set — so this is a stated
 limitation, not a wrong number. But it is still a ceiling, and pagination
-removes it. **Recommend implementing pagination on `main` for the S3 first,
-then it ports to the C6 for free as a buffer-size change.**
+removes it. **Deferred by decision (2026-08-18): not building this yet.** The account is
+at 29 subscriptions against a ceiling of 100, so the limitation is not
+reachable and the honest "partial" subtitle covers it if it ever is. Building
+pagination now would be speculative work against a bound we are nowhere near.
+
+It becomes necessary — and stops being optional — **when the C6 port starts**,
+because that is when the 512KB buffer has to shrink. At that point it is the
+mechanism, not an improvement.
+
+When it is built, the work is:
 
 - [ ] Add `starting_after` cursor and a fetch loop in `stripe_api.c`
 - [ ] Test: multi-page fixture where page 2 completes the total, asserting
       the summed MRR matches a single-page fixture of the same subscriptions
 - [ ] Test: `has_more` true but next page empty (Stripe edge case)
-- [ ] Reduce `SUBS_BUF_LEN` once pagination lands; same for events/invoices
-- [ ] Retire the "partial" subtitle once truncation is no longer reachable
+- [ ] Reduce `SUBS_BUF_LEN`; same for events and invoices
+- [ ] Retire the "partial" subtitle once truncation is unreachable
+
+Watch for: if the subscription count approaches 100 before the port, this
+stops being deferrable on the S3 as well.
+
+---
+
+### Flash budget: not a constraint
+
+Worth stating plainly, because an earlier draft got this wrong. The C6 has
+**16MB of external flash**. The 6MB figure is our *own* `partitions.csv`
+choice (Waveshare's example splits 6M app + 3M spiffs) — neither is imposed
+by the chip. Fixed overhead is about 64KB (bootloader, partition table, nvs,
+phy_init), so **~15.9MB is allocatable** as we see fit.
+
+Current usage: a 1.84MB binary in a 6M partition, 30% full. Even doubling
+every font lands around 3.6MB. A 6M+6M dual-app OTA layout still fits.
+Nothing here is tight.
 
 ---
 
@@ -322,21 +352,23 @@ as "not measurement". The AXP2101 reports charge state directly over I2C.
 
 ## Sequencing
 
-Ordered by risk, not by visibility. The streaming parser is the item that
-could sink the port, so it comes before anything cosmetic.
+Ordered by risk, not by visibility. C2 shrinks the fetch to fit 512KB of
+SRAM, and nothing else can run on the C6 until it does — so it leads, even
+though it is invisible on the glass.
 
 | Order | Stage | Why here | Needs hardware? |
 |---|---|---|---|
-| 1 | **C2 pagination** | Removes the PSRAM dependency, and fixes a real >100-subscription ceiling on the S3 as well | **No** — testable on host today |
+| 1 | **C2 pagination** | Removes the PSRAM dependency. Deferred on the S3 (29 of 100 subs), but required before C1 can run on the C6. | **No** — testable on host |
 | 2 | C3 layout maths | Pure logic + tests; no device needed | No |
 | 3 | C1 board bring-up | First thing on arrival; build colortest *first* | Yes |
 | 4 | C4 colour | Needs the ramp diagnostic on real glass | Yes |
 | 5 | C5 touch | Needs hardware | Yes |
 | 6 | C6 AXP2101 | Needs hardware; `battery.c` already done | Yes |
 
-**Work available before the board arrives (~10 days):** stages C2 and C3 are
-both entirely host-testable. That is the hard parser rewrite and the layout
-maths — comfortably enough to fill the wait, and it front-loads the risk.
+**Work available before the board arrives (~10 days):** C2 and C3 are both
+host-testable with no hardware. C2 is deferred by decision until the port
+proper begins, which leaves **C3 (layout maths at 480x480)** as the natural
+thing to start on — pure logic, existing tests, no device required.
 
 ---
 
@@ -360,6 +392,44 @@ maths — comfortably enough to fill the wait, and it front-loads the risk.
    from the ELF, 2x costs ~2.4MB against a 6M partition. See Stage C3.
 5. **Physical enclosure** — orientation angle unknown until the board arrives;
    `orientation.c` handles it, but the constant needs setting by eye.
+
+---
+
+## Decisions log
+
+Recorded so the reasoning survives, and so reversals are visible rather than
+quietly rewritten.
+
+| Date | Decision | Reasoning |
+|---|---|---|
+| 2026-08-18 | **Connectivity stays WiFi** | Bluetooth reaches a phone, not the internet. BLE relaying would make an unattended desk device depend on a phone being present. BLE *provisioning* noted as a separate future idea. |
+| 2026-08-18 | **Pagination, not streaming** | 512KB buffered vs 25KB retained; `limit=10` gives a ~35KB buffer. Leaves `stripe_parse.c` and its 48 tests untouched. Streaming would rewrite the parser for no additional benefit. **Reverses my earlier claim that streaming was mandatory.** |
+| 2026-08-18 | **Pagination deferred on the S3** | 29 subscriptions against a ceiling of 100; the "partial" subtitle handles the limit honestly. Speculative work against an unreachable bound. Becomes required when the port begins. |
+| 2026-08-18 | **Keep `tapdetect` / `tapstatus`** | The C6 carries the same QMI8658; both files are pure logic and port free. Touch may also give the independent signal needed to disambiguate real taps from the I2C noise that defeated the S3 attempt. |
+| 2026-08-18 | **Keep `esp_lvgl_port`** | Manifest declares `idf >=5.2`, `lvgl >=8,<10`, no target restriction — the C6 is supported. Waveshare use `esp_lvgl_adapter`, but panel driver and LVGL port are independent choices. |
+| 2026-08-18 | **Ship all 12 font sizes** | Reverses an earlier recommendation to cut to 5-6. That rested on an arithmetic error: 2.9MB is `.c` source (ASCII hex), while the linked data is 590KB. 2x costs ~2.4MB against a 6M partition. |
+
+### Corrections to earlier drafts of this plan
+
+Kept visible rather than silently edited, since several were stated with
+misplaced confidence:
+
+- **"Streaming JSON is mandatory"** — wrong. Pagination is sufficient and far
+  cheaper. This was the plan's central risk claim and it did not survive
+  scrutiny.
+- **"12 fonts at 2x need ~11.9MB"** — wrong, off by ~5x. Scaled the on-disk
+  source rather than compiled data. A follow-up measurement was also wrong
+  (1,126KB) because the build tree held stale `stripe_mono_*` objects from the
+  abandoned monospace experiment.
+- **"6MB app partition"** — presented as a chip constraint; it is our own
+  `partitions.csv` choice against 16MB of flash.
+- **"CO5300 / CST9220 confirmed from the example code"** — those part numbers
+  appear nowhere in it. They come from the product page. The example only
+  names the drivers `esp_lcd_sh8601` and `esp_lcd_touch_cst9217`.
+- **"$970.33 is 340px"** — measured 319px.
+- **"Hero cap doubles to 192px"** — at 192px the very strings the section
+  argues for overflow the 416px column.
+- **"26 source files"** — 27.
 
 ---
 
