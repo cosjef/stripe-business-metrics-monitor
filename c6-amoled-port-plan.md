@@ -232,7 +232,46 @@ Nothing here is tight.
 
 ---
 
-## Stage C3 — Layout at 480x480
+## Stage C3 — Layout at 480x480  ✅ DONE (2026-08-18)
+
+**Implemented ahead of hardware.** `main/geometry.c` + `main/layout_c6.h`,
+covered by `test_geometry` (37 checks) and `test_layout_c6` (36 checks). The
+S3 firmware is untouched and still builds; none of this is in the device build
+yet, since nothing calls it until C1.
+
+### The finding that shaped it
+
+The C6 is **2x the pixels but only 1.4x the physical size** — 220 PPI to 314
+PPI, a ratio of 1.43. So there are two scaling rules, not one:
+
+| | scales by | why |
+|---|---|---|
+| **Type sizes** | **x1.43** (physical) | Spec 2.2's floor is in millimetres at 50cm. A 96px hero is 11.1mm; it must stay 11.1mm, which is 137px. |
+| **Positions** | **x2** (proportional) | Baselines are composition. The three-zone skeleton must keep its shape or rotation stops reading as one instrument (spec 5.1). |
+
+Both tempting shortcuts are wrong, in opposite directions: doubling the type
+gives 15.5mm (~40% too large), copying it gives 7.8mm (~30% too small, and
+below the legibility floor). Scaling positions physically would leave the
+layout hugging the top third of the panel. `test_layout_c6` asserts against
+both, and mutation-testing confirms it catches them.
+
+### Corrections this forced
+
+- **"Exact cents become viable"** — wrong. At the correct 137px hero,
+  `$970.33` is 455px against a 434px column. It needs ~130px, one step down.
+  The ARR *decimal* does come back (`$11.2k` is 382px, fits), but exact cents
+  remain a deliberate omission.
+- **"Hero cap 192px"** — wrong, as flagged earlier; the correct value is 137.
+- **`SIZE_HERO_MIN` is 35px, not the 34 that translation produces.** 2.8mm is
+  34.6px here, so rounding to nearest lands just *under* the floor. The
+  geometry module catches this class of error rather than trusting the round.
+- **The footer sits below both floors on the S3 too** (18px = 2.07mm, under
+  the 2.3mm absolute floor). Deliberate per spec 2.2 for glance-irrelevant
+  text; a first draft of the test wrongly demanded it clear the floor.
+
+---
+
+### Original notes
 
 4x the pixels, and the type can roughly double.
 
