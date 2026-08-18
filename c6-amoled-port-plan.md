@@ -158,6 +158,21 @@ accepting more round trips — slower, but it fits.
 
 ---
 
+### Flash budget: not a constraint
+
+Worth stating plainly, because an earlier draft got this wrong. The C6 has
+**16MB of external flash**. The 6MB figure in this plan is our *own*
+`partitions.csv` choice (Waveshare's example splits 6M app + 3M spiffs) —
+neither is imposed by the chip. Fixed overhead is about 64KB (bootloader,
+partition table, nvs, phy_init), so **~15.9MB is available to allocate** as we
+see fit.
+
+Current usage: a 1.84MB binary in a 6M partition, 30% full. Even doubling
+every font (see C3) lands around 3.6MB. If we ever want OTA, a 6M+6M dual-app
+layout still fits. Nothing here is tight.
+
+---
+
 ## Stage C3 — Layout at 480x480
 
 4x the pixels, and the type can roughly double.
@@ -182,11 +197,13 @@ fits at full size, and so does `$970.33` exact (measured 319px at 96px). The
 compromise was forced by the small panel, not by taste.
 
 - [ ] Regenerate fonts at 2x sizes
-- [ ] **Flash budget is a real constraint here.** Current fonts are 2.9MB
-      across 12 sizes; bitmap fonts scale with *area*, so a naive 2x
-      regeneration is ~11.9MB against a 6MB app partition. **It does not fit.**
-      Ship only the sizes actually used — likely 5-6, not 12 — and consider
-      dropping the unused low end (18/20/22px exist for footers only)
+- [ ] **Flash is not a constraint. Ship all 12 sizes.** An earlier draft of
+      this plan claimed a naive 2x regeneration would need ~11.9MB and not
+      fit. That was wrong: it scaled the 2.9MB of `.c` source on disk, which
+      is ASCII hex arrays, roughly 5x larger than the compiled data. Measured
+      from the linked ELF, the 12 sizes contribute **590KB**, so 2x is
+      about **2.4MB** — comfortable inside the existing 6M app partition,
+      with ~2.5MB spare.
 - [ ] Rework `layout.h` constants; `hero_size.c` logic is unchanged (it reads
       `TEXT_COLUMN_PX` and the size table)
 - [ ] Rework `test_layout` / `test_screens` for the new geometry (241 checks)
@@ -237,14 +254,20 @@ The thing you asked for back in Stage 2 and could not have.
 - [ ] Tap to pause/resume rotation (a glance-and-hold gesture)
 - [ ] Keep both physical buttons working — touch is an addition, not a
       replacement. A device you can drive without looking at it is better.
-- [ ] **Retire `tapdetect.c` / `tapstatus.c`?** These are the IMU tap-detection
-      modules built and then abandoned on the S3 when the QMI8658 hardware tap
-      engine never fired. They carry **406 of our 1,222 checks** (33%) for a
-      feature that does not ship. The C6 board also has a QMI8658, so they
-      *could* be revived — but real touch hardware makes IMU tap navigation
-      redundant. **Recommend deleting both, and the 406 checks with them.**
-      Carrying a third of the suite for dead code inflates the number without
-      protecting anything. Decision needed.
+- [x] **`tapdetect.c` / `tapstatus.c` stay.** (Decided 2026-08-18.) These are
+      the IMU tap-detection modules built and abandoned on the S3 when the
+      QMI8658 hardware tap engine never fired; they carry 406 of our 1,222
+      checks. I had recommended deleting them as dead weight — overruled, and
+      the C6 gives a reason to keep them: **it carries the same QMI8658**
+      (Waveshare example `02_I2C_QMI8658`), so the host-side detection logic
+      that worked on the S3 is directly reusable. Both files are pure logic
+      with no ESP-IDF dependency, so they port for free and cost nothing but
+      flash.
+- [ ] Consider reviving IMU tap as a *complement* to touch rather than a
+      replacement: on the S3 the blocker was that corrupt I2C reads and real
+      taps both landed in single 20ms samples. Touch now provides an
+      independent signal that could disambiguate them — a tap confirmed by
+      neither touch nor the button is more likely noise.
 
 ---
 
@@ -290,13 +313,22 @@ maths — comfortably enough to fill the wait, and it front-loads the risk.
 
 ## Open questions
 
-1. **`esp_lvgl_adapter` or `esp_lvgl_port`?** Waveshare's example uses the
-   former; we use the latter. Needs a look at the adapter's API before C1.
-2. **Delete `tapdetect`/`tapstatus`?** 406 checks guarding an abandoned
-   feature, superseded by real touch. Recommend deleting.
+1. ~~**`esp_lvgl_adapter` or `esp_lvgl_port`?**~~ — **Resolved: keep
+   `esp_lvgl_port`.** Its manifest declares `idf: '>=5.2'` and
+   `lvgl: '>=8,<10'` with **no target restriction**, so the C6 is supported.
+   Waveshare's example uses `esp_lvgl_adapter`, but nothing forces us to
+   follow it — the display driver (`esp_lcd_sh8601`) and the LVGL port are
+   independent choices. Keeping `esp_lvgl_port` means `display.c` changes
+   only in which panel driver it instantiates, and every LVGL call above it
+   stays identical. If bring-up hits an adapter-specific quirk in Waveshare's
+   init sequence, revisit then.
+2. ~~**Delete `tapdetect`/`tapstatus`?**~~ — **Resolved: keep both.** The C6
+   has the same QMI8658, and both files are pure logic that ports for free.
 3. **Keep the S3 build?** Dual-target adds CMake and CI complexity. Suggest
    the C6 becomes `main` once it works, with the S3 kept on a tag.
-4. **Font sizes to ship** — 12 sizes will not fit at 2x. Which 5-6 matter?
+4. ~~**Font sizes to ship**~~ — **Resolved: ship all 12.** The constraint was
+   an arithmetic error on my part (source size vs compiled size); measured
+   from the ELF, 2x costs ~2.4MB against a 6M partition. See Stage C3.
 5. **Physical enclosure** — orientation angle unknown until the board arrives;
    `orientation.c` handles it, but the constant needs setting by eye.
 
