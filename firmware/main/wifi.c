@@ -1,5 +1,9 @@
 #include "wifi.h"
 
+#include "wifi_retry.h"
+
+#include "esp_timer.h"
+
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -19,19 +23,63 @@ static const char *TAG = "wifi";
 #define AP_CHANNEL         1
 
 /*
- * Station retry policy.
+ * Station retry policy lives in wifi_retry.c, host-tested.
  *
- * Bounded rather than infinite: after this many failures the device shows the
- * failure on screen instead of retrying silently forever, which is spec 4's
- * "never lie" principle applied to connectivity.
+ * It was previously a flat bound of 5 attempts here, with the counter reset
+ * only on a successful join. That permanently disabled connectivity after five
+ * disconnects accumulated over the device's lifetime -- the device sat on the
+ * stale screen forever and only a power cycle recovered it. The bound is
+ * correct for first-run provisioning and wrong for a device already proven on
+ * the network; wifi_retry_t makes that distinction.
  */
-#define STA_MAX_RETRIES 5
 
 static wifi_state_t s_state = WIFI_STATE_IDLE;
 static esp_netif_t *s_netif_ap = NULL;
 static esp_netif_t *s_netif_sta = NULL;
-static int s_retries = 0;
+static wifi_retry_t s_retry;
 static esp_ip4_addr_t s_ip = {0};
+
+/* Timer that drives delayed reconnection, so backoff does not block the event
+ * loop or spin the radio. */
+static esp_timer_handle_t s_reconnect_timer = NULL;
+
+static void reconnect_timer_cb(void *arg)
+{
+    (void)arg;
+    esp_wifi_connect();
+}
+
+/*
+ * Schedule the next association attempt after the policy's backoff.
+ *
+ * A zero delay connects immediately: most drops are momentary and recover at
+ * once, so the first retry should not wait.
+ */
+static void schedule_reconnect(void)
+{
+    const int delay_ms = wifi_retry_delay_ms(&s_retry);
+
+    if (delay_ms <= 0) {
+        esp_wifi_connect();
+        return;
+    }
+
+    if (s_reconnect_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = reconnect_timer_cb,
+            .name = "wifi_reconnect",
+        };
+        if (esp_timer_create(&args, &s_reconnect_timer) != ESP_OK) {
+            /* Without a timer, fall back to connecting immediately rather
+             * than not reconnecting at all. */
+            esp_wifi_connect();
+            return;
+        }
+    }
+
+    esp_timer_stop(s_reconnect_timer);
+    esp_timer_start_once(s_reconnect_timer, (uint64_t)delay_ms * 1000);
+}
 
 static void on_wifi_event(void *arg, esp_event_base_t base,
                           int32_t id, void *data)
@@ -46,13 +94,23 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
             break;
 
         case WIFI_EVENT_STA_DISCONNECTED:
-            if (s_retries < STA_MAX_RETRIES) {
-                s_retries++;
-                ESP_LOGW(TAG, "disconnected, retry %d/%d", s_retries, STA_MAX_RETRIES);
-                esp_wifi_connect();
+            wifi_retry_on_disconnect(&s_retry);
+
+            if (wifi_retry_should_reconnect(&s_retry)) {
+                const int delay_ms = wifi_retry_delay_ms(&s_retry);
+                ESP_LOGW(TAG, "disconnected (fail %d%s), reconnecting in %dms",
+                         s_retry.consecutive_fails,
+                         wifi_retry_ever_connected(&s_retry) ? ", known-good creds"
+                                                             : ", provisioning",
+                         delay_ms);
+                schedule_reconnect();
                 s_state = WIFI_STATE_CONNECTING;
             } else {
-                ESP_LOGE(TAG, "giving up after %d attempts", STA_MAX_RETRIES);
+                /* Only reachable during provisioning: a device that has held
+                 * an IP never gives up. */
+                ESP_LOGE(TAG, "giving up after %d attempts (never connected; "
+                         "credentials are probably wrong)",
+                         WIFI_PROVISION_MAX_RETRIES);
                 s_state = WIFI_STATE_FAILED;
             }
             break;
@@ -71,7 +129,7 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         const ip_event_got_ip_t *e = (const ip_event_got_ip_t *)data;
         s_ip = e->ip_info.ip;
-        s_retries = 0;
+        wifi_retry_on_connected(&s_retry);
         s_state = WIFI_STATE_CONNECTED;
         ESP_LOGI(TAG, "connected, ip " IPSTR, IP2STR(&s_ip));
     }
@@ -145,7 +203,7 @@ esp_err_t wifi_start_sta(const char *ssid, const char *pass)
      * required to use. */
     cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
 
-    s_retries = 0;
+    wifi_retry_init(&s_retry);
     s_state = WIFI_STATE_CONNECTING;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "set STA mode failed");
@@ -183,7 +241,7 @@ esp_err_t wifi_start_apsta(char *out_ap_ssid, size_t out_ap_ssid_len,
     }
     sta_cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
 
-    s_retries = 0;
+    wifi_retry_init(&s_retry);
     s_state = WIFI_STATE_CONNECTING;
 
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_APSTA), TAG, "set APSTA failed");
