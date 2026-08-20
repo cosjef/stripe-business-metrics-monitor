@@ -10,10 +10,14 @@ firmware/managed_components/
 firmware/sdkconfig
 firmware/sdkconfig.old
 
-# Host test binaries and their debug bundles
-firmware/test/test_hero_size
-firmware/test/test_font_coverage
-firmware/test/test_layout
+# Host test binaries and their debug bundles.
+#
+# A pattern, not a list. This was previously one line per suite, so every new
+# test leaked its compiled binary into the repo -- test_battery, test_state and
+# test_orientation all got committed that way before this was noticed.
+firmware/test/test_*
+!firmware/test/test_*.c
+!firmware/test/test_*.h
 *.dSYM/
 
 # Python venv used for font tooling

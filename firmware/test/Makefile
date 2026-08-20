@@ -33,7 +33,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
 CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_wifi_retry
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
@@ -115,3 +115,5 @@ test_battery: test_battery.c ../main/battery.c ../main/battery.h
 
 test_orientation: test_orientation.c ../main/orientation.c ../main/orientation.h
 	$(CC) $(CFLAGS) -o $@ test_orientation.c ../main/orientation.c
+test_wifi_retry: test_wifi_retry.c ../main/wifi_retry.c ../main/wifi_retry.h
+	$(CC) $(CFLAGS) -o $@ test_wifi_retry.c ../main/wifi_retry.c
