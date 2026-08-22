@@ -388,6 +388,35 @@ static void test_battery_screen(void)
     check_int("no green on a battery warning", count_color(COLOR_GREEN), 0);
 }
 
+/*
+ * The stale footer now carries the failure cause. Rendered rather than
+ * asserted as a string, because the risk is that a longer footer overflows the
+ * column and LVGL silently clips it -- no error, just a truncated word.
+ */
+static void test_stale_footer_with_cause(void)
+{
+    current_screen = "stale_cause";
+    printf("stale footer renders the failure cause without clipping\n");
+
+    /* The widest realistic combination: capped backoff, longest tag. */
+    screen_draw_stale(harness_screen(), "MRR", "$1.0k",
+                      "stale | 22 min", "retry in 900s / stripe down");
+    harness_render();
+
+    expect_background();
+    expect_padding_respected();
+
+    /* The amber age line must still dominate; the footer stays dim. */
+    check_true("age is still amber", count_color(COLOR_AMBER) > 40);
+    check_true("footer is dim, not competing", count_color(COLOR_DIM) > 20);
+
+    /* And the short form is unchanged from before this feature. */
+    screen_draw_stale(harness_screen(), "MRR", "$1.0k",
+                      "stale | 22 min", "retry in 60s");
+    harness_render();
+    expect_padding_respected();
+}
+
 /* ---- state screens ---- */
 
 /*
@@ -512,6 +541,7 @@ int main(void)
     test_green_discipline();
     test_red_discipline();
     test_battery_screen();
+    test_stale_footer_with_cause();
     test_stale_screen();
     test_auth_error_screen();
     test_setup_screen();

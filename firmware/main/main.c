@@ -27,6 +27,7 @@
 #include "hero_size.h"
 #include "screens.h"
 #include "battery.h"
+#include "failtag.h"
 #include "netwatch.h"
 #include "state.h"
 #include "settings.h"
@@ -93,6 +94,10 @@ static esp_timer_handle_t s_rotation_timer = NULL;
 
 /* Tracks how old the displayed data is, which drives State A (spec 6.2). */
 static netwatch_t s_netwatch;
+
+/* Why the last fetch failed, for the stale footer. Reset on success so a
+ * recovered device does not keep explaining an outage that is over. */
+static failtag_t s_last_failure = FAILTAG_NONE;
 static freshness_t s_freshness;
 static bool s_time_synced = false;
 
@@ -493,14 +498,10 @@ static void show_current(const char *why)
 
         /* The retry status belongs in the footer so the reader knows the
          * device is still trying rather than given up. */
-        char footer[32];
+        char footer[FAILTAG_FOOTER_LEN];
         const int64_t delay = freshness_retry_delay_ms(&s_freshness);
-        if (delay > 0) {
-            snprintf(footer, sizeof(footer), "retry in %ds",
-                     (int)(delay / 1000));
-        } else {
-            snprintf(footer, sizeof(footer), "retrying");
-        }
+        failtag_build_footer(footer, sizeof(footer), (int)(delay / 1000),
+                             s_last_failure);
 
         lvgl_port_lock(0);
         screen_draw_stale(lv_screen_active(), s_rotation[id].label,
@@ -850,6 +851,9 @@ static void refresh_task(void *arg)
                 s_auth_status = 401;
                 show_current("auth");
             } else {
+                /* Remember why, so the stale footer can say whether the fault
+                 * looks local or upstream. */
+                s_last_failure = failtag_from_result((int)r);
                 ESP_LOGW(TAG, "full refresh failed: %s", stripe_result_str(r));
             }
         }
@@ -922,6 +926,7 @@ static void refresh_task(void *arg)
 
         if (any_success) {
             netwatch_on_success(&s_netwatch);
+            s_last_failure = FAILTAG_NONE;
             /* Persist so the next boot has something to show immediately. */
             cache_t c = {
                 .version = CACHE_VERSION,
