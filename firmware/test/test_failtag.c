@@ -165,22 +165,30 @@ static void test_maps_from_result_codes(void)
 {
     printf("stripe result codes map to tags\n");
 
+    /*
+     * By symbol, not by literal. An earlier version of this test asserted
+     * failtag_from_result(1) == FAILTAG_NETWORK, with the same magic numbers
+     * the implementation used -- so reordering stripe_result_t would have left
+     * test and code agreeing with each other and both wrong. Using the enum
+     * means the compiler resolves both sides from one definition.
+     */
     check_true("network maps",
-               failtag_from_result(1) == FAILTAG_NETWORK);   /* ERR_NETWORK */
+               failtag_from_result(STRIPE_ERR_NETWORK) == FAILTAG_NETWORK);
     check_true("tls maps",
-               failtag_from_result(2) == FAILTAG_TLS);       /* ERR_TLS */
+               failtag_from_result(STRIPE_ERR_TLS) == FAILTAG_TLS);
     check_true("rate limit maps",
-               failtag_from_result(4) == FAILTAG_RATE);      /* ERR_RATE_LIMITED */
+               failtag_from_result(STRIPE_ERR_RATE_LIMITED) == FAILTAG_RATE);
     check_true("server maps",
-               failtag_from_result(5) == FAILTAG_SERVER);    /* ERR_SERVER */
+               failtag_from_result(STRIPE_ERR_SERVER) == FAILTAG_SERVER);
     check_true("bad response maps",
-               failtag_from_result(6) == FAILTAG_BAD);       /* ERR_BAD_RESPONSE */
+               failtag_from_result(STRIPE_ERR_BAD_RESPONSE) == FAILTAG_BAD);
 
-    /* Success and auth both produce no tag: success has nothing to report, and
-     * auth never reaches this screen. */
-    check_true("success has no tag", failtag_from_result(0) == FAILTAG_NONE);
+    check_true("success has no tag",
+               failtag_from_result(STRIPE_OK) == FAILTAG_NONE);
     check_true("auth has no tag -- it has its own screen",
-               failtag_from_result(3) == FAILTAG_NONE);
+               failtag_from_result(STRIPE_ERR_UNAUTHORIZED) == FAILTAG_NONE);
+    check_true("out of memory has no tag -- nothing the reader can do",
+               failtag_from_result(STRIPE_ERR_NO_MEMORY) == FAILTAG_NONE);
 }
 
 int main(void)

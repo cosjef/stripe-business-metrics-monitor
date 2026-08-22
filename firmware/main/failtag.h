@@ -25,6 +25,8 @@
 
 #include <stddef.h>
 
+#include "stripe_result.h"
+
 /*
  * Longest footer is "retry in 900s / stripe down" at 27 characters. 40 gives
  * room without inviting a tag long enough to overflow the column -- which
@@ -47,14 +49,10 @@ const char *failtag_for(failtag_t t);
 /*
  * Map a stripe_result_t to a tag.
  *
- * Takes an int rather than the enum so this file stays free of stripe_api.h,
- * which pulls in ESP-IDF. The values match stripe_result_t's declaration order
- * and test_failtag pins the mapping.
- *
  * Auth failures map to FAILTAG_NONE: they have their own screen and never
  * reach the stale footer.
  */
-failtag_t failtag_from_result(int stripe_result);
+failtag_t failtag_from_result(stripe_result_t r);
 
 /*
  * Build the footer: the retry countdown, plus the tag when there is one.

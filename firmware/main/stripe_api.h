@@ -18,16 +18,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-typedef enum {
-    STRIPE_OK = 0,
-    STRIPE_ERR_NETWORK,      /* could not reach the API at all */
-    STRIPE_ERR_TLS,          /* handshake or certificate failure */
-    STRIPE_ERR_UNAUTHORIZED, /* 401: key revoked, wrong scope, or account gone */
-    STRIPE_ERR_RATE_LIMITED, /* 429 */
-    STRIPE_ERR_SERVER,       /* 5xx */
-    STRIPE_ERR_BAD_RESPONSE, /* 2xx but unparseable */
-    STRIPE_ERR_NO_MEMORY,
-} stripe_result_t;
+/* Result codes live in their own header so host-testable files can classify
+ * them without pulling in ESP-IDF. */
+#include "stripe_result.h"
 
 /* Message for logs and the auth-error screen. Never includes the key. */
 const char *stripe_result_str(stripe_result_t r);

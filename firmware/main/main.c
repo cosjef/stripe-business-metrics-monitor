@@ -853,7 +853,7 @@ static void refresh_task(void *arg)
             } else {
                 /* Remember why, so the stale footer can say whether the fault
                  * looks local or upstream. */
-                s_last_failure = failtag_from_result((int)r);
+                s_last_failure = failtag_from_result(r);
                 ESP_LOGW(TAG, "full refresh failed: %s", stripe_result_str(r));
             }
         }

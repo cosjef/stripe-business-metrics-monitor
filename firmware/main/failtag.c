@@ -19,21 +19,28 @@ const char *failtag_for(failtag_t t)
     return "";
 }
 
-failtag_t failtag_from_result(int stripe_result)
+failtag_t failtag_from_result(stripe_result_t r)
 {
-    /* Mirrors stripe_result_t in stripe_api.h. Kept as literals so this file
-     * does not pull in ESP-IDF headers; test_failtag pins the correspondence. */
-    switch (stripe_result) {
-    case 1: return FAILTAG_NETWORK;       /* STRIPE_ERR_NETWORK */
-    case 2: return FAILTAG_TLS;           /* STRIPE_ERR_TLS */
-    case 4: return FAILTAG_RATE;          /* STRIPE_ERR_RATE_LIMITED */
-    case 5: return FAILTAG_SERVER;        /* STRIPE_ERR_SERVER */
-    case 6: return FAILTAG_BAD;           /* STRIPE_ERR_BAD_RESPONSE */
-    default: break;
+    /*
+     * Switched on the enum without a default, so -Werror=switch flags any new
+     * result code added to stripe_result.h rather than letting it fall through
+     * to "no tag" unnoticed.
+     */
+    switch (r) {
+    case STRIPE_ERR_NETWORK:      return FAILTAG_NETWORK;
+    case STRIPE_ERR_TLS:          return FAILTAG_TLS;
+    case STRIPE_ERR_RATE_LIMITED: return FAILTAG_RATE;
+    case STRIPE_ERR_SERVER:       return FAILTAG_SERVER;
+    case STRIPE_ERR_BAD_RESPONSE: return FAILTAG_BAD;
+
+    /* Deliberately untagged: OK has nothing to report, UNAUTHORIZED has its
+     * own screen, and NO_MEMORY is not something the reader can act on. */
+    case STRIPE_OK:
+    case STRIPE_ERR_UNAUTHORIZED:
+    case STRIPE_ERR_NO_MEMORY:
+        break;
     }
 
-    /* STRIPE_OK, STRIPE_ERR_UNAUTHORIZED (own screen), STRIPE_ERR_NO_MEMORY
-     * (nothing the reader can act on) all fall through untagged. */
     return FAILTAG_NONE;
 }
 
