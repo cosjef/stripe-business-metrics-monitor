@@ -135,6 +135,19 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
     }
 }
 
+void wifi_force_reconnect(void)
+{
+    ESP_LOGW(TAG, "forcing reconnect: repeated fetch failures suggest the "
+             "link is down despite no disconnect event");
+
+    /* Disconnect first. Calling connect() on a station that believes it is
+     * already associated is a no-op, which is exactly the situation this
+     * exists to break out of. The induced STA_DISCONNECTED then drives the
+     * normal reassociation path through wifi_retry. */
+    esp_wifi_disconnect();
+    esp_wifi_connect();
+}
+
 esp_err_t wifi_init(void)
 {
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "netif init failed");

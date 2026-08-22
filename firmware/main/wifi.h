@@ -53,3 +53,19 @@ wifi_state_t wifi_get_state(void);
 
 /* Dotted-quad IP once connected, or "0.0.0.0". Buffer should be >= 16 bytes. */
 void wifi_get_ip(char *out, size_t out_len);
+
+/*
+ * Force a fresh association, regardless of what the driver believes the link
+ * state to be.
+ *
+ * Exists because reconnection is otherwise driven only by STA_DISCONNECTED,
+ * and that event does not fire when an AP vanishes without deauthenticating or
+ * when a link associates and then blackholes. In those cases the station still
+ * reports itself connected while no traffic passes, and nothing would ever
+ * retry. The poll loop calls this when repeated fetch failures make the radio
+ * the prime suspect (netwatch.h).
+ *
+ * Safe to call when genuinely connected: the disconnect it induces is reported
+ * normally and wifi_retry handles the reassociation.
+ */
+void wifi_force_reconnect(void);

@@ -27,6 +27,7 @@
 #include "hero_size.h"
 #include "screens.h"
 #include "battery.h"
+#include "netwatch.h"
 #include "state.h"
 #include "settings.h"
 #include "cache.h"
@@ -91,6 +92,7 @@ static int s_index = 0;
 static esp_timer_handle_t s_rotation_timer = NULL;
 
 /* Tracks how old the displayed data is, which drives State A (spec 6.2). */
+static netwatch_t s_netwatch;
 static freshness_t s_freshness;
 static bool s_time_synced = false;
 
@@ -919,6 +921,7 @@ static void refresh_task(void *arg)
         }
 
         if (any_success) {
+            netwatch_on_success(&s_netwatch);
             /* Persist so the next boot has something to show immediately. */
             cache_t c = {
                 .version = CACHE_VERSION,
@@ -943,6 +946,18 @@ static void refresh_task(void *arg)
             show_current("refresh");
         } else {
             freshness_mark_failure(&s_freshness);
+
+            /*
+             * Repeated failures with no disconnect event means the link is
+             * probably dead in a way the driver has not noticed. Force a
+             * reassociation rather than fetching into the void until someone
+             * power-cycles the device.
+             */
+            if (netwatch_should_reconnect(&s_netwatch,
+                                          s_freshness.consecutive_failures)) {
+                wifi_force_reconnect();
+                netwatch_on_reconnect_triggered(&s_netwatch);
+            }
         }
 
         /* Back off after failures, otherwise poll events on their interval
@@ -967,6 +982,7 @@ static void run_normal_mode(void)
     ESP_ERROR_CHECK(wifi_start_sta(ssid, pass));
 
     freshness_init(&s_freshness);
+    netwatch_init(&s_netwatch);
 
     /* Cached values first, dashes only if there are none (spec 7.4 step 1). */
     if (!restore_cache()) {
