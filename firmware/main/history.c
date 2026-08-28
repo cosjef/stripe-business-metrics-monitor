@@ -60,6 +60,14 @@ bool history_has_trend(const history_t *h)
     return h->count >= HISTORY_MIN_FOR_TREND;
 }
 
+int64_t history_value_at(const history_t *h, int i)
+{
+    if (i < 0 || i >= h->count) {
+        return 0;
+    }
+    return h->value[idx_of(h, i)];
+}
+
 int64_t history_latest(const history_t *h)
 {
     if (h->count == 0) {

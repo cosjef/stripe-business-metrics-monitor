@@ -74,6 +74,12 @@ int history_count(const history_t *h);
 /* Whether there is enough history to honestly draw a trend. */
 bool history_has_trend(const history_t *h);
 
+/*
+ * Value of the i-th sample, oldest first. Out-of-range returns 0.
+ * Used by the sparkline to walk the series in order.
+ */
+int64_t history_value_at(const history_t *h, int i);
+
 /* Newest and oldest values held. Zero if empty. */
 int64_t history_latest(const history_t *h);
 int64_t history_oldest(const history_t *h);

@@ -316,6 +316,68 @@ considering what genuinely earns space.
 
 ---
 
+## Stage C7 — Using the extra capacity  🔄 IN PROGRESS
+
+Added 2026-08-22 after measuring what the panel actually gives.
+
+### The finding
+
+At correct physical type sizes, **54% of the C6 panel is empty** — against 35%
+on the S3. That is 257px of unused height, and it is real physical area
+(1.97x), not just denser pixels.
+
+### Decisions
+
+| | Decision | Reasoning |
+|---|---|---|
+| Extra space | **Hero + sparkline** | Keeps one metric per screen. Turns a snapshot into a direction: "$1,052 and climbing" is a different fact from "$1,052". Two-metric layouts were rejected — two numbers competing for the glance is what the one-number discipline exists to prevent. |
+| Touch | **Swipe to change screens** | The Stage 2 request the S3 hardware could not do. Tap-to-pause and tap-for-detail deferred. |
+| New screens | **Revenue collected today only** | `revenue_cents` is already fetched and discarded. Everything else was rejected: 10 screens already exist, and more means each comes round less often. |
+
+### Done
+
+- [x] `history.c` — daily series, 30-day ring buffer (29 checks)
+- [x] `sparkline.c` — series to screen coordinates (37 checks)
+
+### The sourcing problem
+
+**Stripe has no historical MRR endpoint.** The device must accumulate its own
+series, one sample per local day from first boot. Two consequences shaped the
+design:
+
+- **A fresh device shows no trend for seven days.** It declines to draw rather
+  than rendering a two-point line asserting a direction nobody measured.
+- **Gaps stay absent, never zero.** A device switched off for a week would
+  otherwise draw a cliff to the floor of the chart, reading as total revenue
+  collapse. Absent and zero are different facts.
+
+### Layout
+
+The empty band sits *above* the hero, which is the wrong place — a chart there
+competes with the number for first attention. So the hero moves up and the
+spark sits beneath it, preserving reading order:
+
+```
+  label      y 32..61
+  hero       y 134..232     <- moved up from baseline 300
+  sparkline  y 258..342     <- 84px tall, full 434px column
+  subtitle   y 384
+  footer     y 432
+  dots       y 456
+```
+
+Hero remains the largest element at 1.6x the spark height.
+
+### Remaining
+
+- [ ] Persist history to NVS (360 bytes/metric, ~1.5KB for four)
+- [ ] LVGL renderer for the plotted points
+- [ ] `screen_draw_rotation` variant carrying a spark
+- [ ] REVENUE TODAY screen from the already-fetched `revenue_cents`
+- [ ] Swipe gesture via LVGL `LV_EVENT_GESTURE`
+
+---
+
 ## Stage C4 — Colour, freed
 
 The most interesting change. Section 3.1 of the spec chose `#121211` over
