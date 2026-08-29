@@ -17,7 +17,14 @@
  * millimetres, while positions grow 2x to keep the composition. See
  * layout_c6.h and test_layout_c6.c.
  */
-#ifdef CONFIG_IDF_TARGET_ESP32C6
+/*
+ * BOARD_C6_AMOLED_216 is the Arduino/PlatformIO port's selector. That build
+ * has no sdkconfig.h, so CONFIG_IDF_TARGET_ESP32C6 is never defined and the
+ * C6 would silently fall through to the S3 ladder -- every size and baseline
+ * wrong by the density ratio, on a panel that would still render happily.
+ * Both builds must land on the same constants; see arduino/platformio.ini.
+ */
+#if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(BOARD_C6_AMOLED_216)
 #include "layout_c6.h"
 
 #define PANEL_PX            C6_PANEL_PX

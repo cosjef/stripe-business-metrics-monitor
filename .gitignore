@@ -37,3 +37,6 @@ firmware/test/test_freshness
 firmware/test/test_events
 firmware/test/test_rotation
 firmware/test/test_cache
+
+# PlatformIO build output and fetched libraries (arduino/ port)
+arduino/.pio/
