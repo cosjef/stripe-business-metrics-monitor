@@ -29,5 +29,16 @@ bool settings_have_stripe_key(void);
 bool settings_get_stripe_key(char *key, size_t key_len);
 bool settings_set_stripe_key(const char *key);
 
+/*
+ * The MRR history series (history_t), stored as an opaque blob.
+ *
+ * Kept so a reboot does not restart the seven-day wait before the device can
+ * honestly show a trend. Written once a day when the sample rolls over, not
+ * on every fetch -- NVS is flash, and a ten-minute poll would be ~4,300
+ * writes a month for a value that changes once.
+ */
+bool settings_save_history(const void *blob, size_t len);
+bool settings_load_history(void *out, size_t len);
+
 /* Wipe everything: the factory reset behind a long press. */
 bool settings_clear_all(void);

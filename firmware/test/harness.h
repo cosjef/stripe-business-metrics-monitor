@@ -14,8 +14,17 @@
 
 #include "lvgl.h"
 
+/*
+ * Panel size. Defaults to the S3's 240x240, which is what the existing tests
+ * assert against; override at compile time (-DHARNESS_W=480) to render the
+ * C6 panel without disturbing them.
+ */
+#ifndef HARNESS_W
 #define HARNESS_W 240
+#endif
+#ifndef HARNESS_H
 #define HARNESS_H 240
+#endif
 
 /* Initialize LVGL and create the offscreen display. Idempotent. */
 void harness_init(void);

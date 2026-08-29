@@ -17,6 +17,7 @@
 #define KEY_WIFI_SSID "wifi_ssid"
 #define KEY_WIFI_PASS "wifi_pass"
 #define KEY_STRIPE    "stripe_key"
+#define KEY_HISTORY   "mrr_history"
 
 /*
  * Every read guards with isKey() before getString().
@@ -161,6 +162,37 @@ bool settings_set_stripe_key(const char *key)
     const bool ok = s_prefs.putString(KEY_STRIPE, key) > 0;
     s_prefs.end();
     return ok;
+}
+
+bool settings_save_history(const void *blob, size_t len)
+{
+    if (blob == NULL || len == 0 || !open_rw()) {
+        return false;
+    }
+    const bool ok = s_prefs.putBytes(KEY_HISTORY, blob, len) == len;
+    s_prefs.end();
+    return ok;
+}
+
+bool settings_load_history(void *out, size_t len)
+{
+    if (out == NULL || len == 0 || !open_ro()) {
+        return false;
+    }
+    if (!s_prefs.isKey(KEY_HISTORY)) {
+        s_prefs.end();
+        return false;
+    }
+    /*
+     * Size must match exactly. A short read would leave the tail of the
+     * struct uninitialised -- including count and head, which index the ring
+     * -- and a history_t with a garbage head reads samples from nowhere. If
+     * the layout ever changes, treat the stored blob as absent rather than
+     * reinterpreting it.
+     */
+    const size_t got = s_prefs.getBytes(KEY_HISTORY, out, len);
+    s_prefs.end();
+    return got == len;
 }
 
 bool settings_clear_all(void)

@@ -44,3 +44,9 @@ arduino/.pio/
 # Bench credentials, if a secrets.ini is ever reintroduced. Credentials now
 # come from the captive portal into NVS, so this should stay unused.
 arduino/secrets.ini
+
+# Design-mock renders and binary (firmware/test/mock_*)
+firmware/test/mock_mrr
+firmware/test/*.ppm
+mrr-mock.png
+mrr-card.png

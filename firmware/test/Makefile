@@ -63,6 +63,15 @@ test_screens: test_screens.c harness.c ../main/screens.c ../main/hero_size.c \
 	  test_screens.c harness.c ../main/screens.c ../main/hero_size.c \
 	  ../main/baseline.c $(FONT_SRCS) $(LV_SRCS)
 
+# Design mock: renders the MRR screen through real LVGL and the real C6
+# fonts/layout at 480x480, for judging a layout before it costs a flash cycle.
+# Not part of `make` or the suite -- it asserts nothing.
+mock_mrr: mock_mrr.c harness.c ../main/hero_size.c ../main/baseline.c \
+          $(FONT_SRCS) lv_conf.h $(DEPS)
+	$(CC) $(LV_CFLAGS) -DHARNESS_W=480 -DHARNESS_H=480 -DBOARD_C6_AMOLED_216 \
+	  -o $@ mock_mrr.c harness.c ../main/screens.c ../main/hero_size.c \
+	  ../main/baseline.c $(FONT_SRCS) $(LV_SRCS)
+
 quick: $(LOGIC_BINS)
 	@fail=0; for t in $(LOGIC_BINS); do ./$$t || fail=1; echo; done; exit $$fail
 

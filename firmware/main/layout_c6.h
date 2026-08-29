@@ -61,5 +61,33 @@
  * its own threshold. geom_meets_legibility_floor() catches that; see
  * test_geometry.c.
  */
+/*
+ * Card layout (screen_draw_card).
+ *
+ * The three-zone skeleton above is the S3 composition scaled up. It works,
+ * but it spends the panel's extra height on nothing: with the hero at its
+ * physical size there is a ~200px band between the label and the number doing
+ * no work. These constants spend that band on a trend.
+ *
+ * Derived from the same rules as everything else here -- padding and type
+ * scale physically, positions proportionally -- and asserted in
+ * test_screens.c so a hand-tune has to update a test.
+ */
+#define C6_CARD_Y               (76)    /* below the label row */
+#define C6_CARD_H               (300)   /* to just above the dots */
+#define C6_CARD_RADIUS          (16)
+#define C6_CARD_PAD             (28)    /* inner inset, > PAD_PX for depth */
+
+/* Rows inside the card, as offsets from its top. */
+#define C6_CARD_SUBTITLE_DY     (22)
+#define C6_CARD_HERO_BASELINE_DY (190)  /* baseline, not top */
+#define C6_CARD_BAR_DY          (220)   /* 30px under the hero baseline */
+#define C6_CARD_BAR_H           (14)
+#define C6_CARD_CAPTION_DY      (248)   /* 14px under the bar */
+
+/* Delta pill, right-aligned on the label row. */
+#define C6_PILL_PAD_X           (16)
+#define C6_PILL_PAD_Y           (6)
+
 #define C6_LEGIBILITY_FLOOR_PX  (35)
 #define C6_ABSOLUTE_FLOOR_PX    (29)

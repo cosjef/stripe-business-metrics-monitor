@@ -43,6 +43,19 @@
 #define SIZE_HERO_MAX       C6_SIZE_HERO_MAX
 #define SIZE_HERO_MIN       C6_SIZE_HERO_MIN
 
+/* Card layout (screen_draw_card); see layout_c6.h for the derivation. */
+#define CARD_Y              C6_CARD_Y
+#define CARD_H              C6_CARD_H
+#define CARD_RADIUS         C6_CARD_RADIUS
+#define CARD_PAD            C6_CARD_PAD
+#define CARD_SUBTITLE_DY    C6_CARD_SUBTITLE_DY
+#define CARD_HERO_BASELINE_DY C6_CARD_HERO_BASELINE_DY
+#define CARD_BAR_DY         C6_CARD_BAR_DY
+#define CARD_BAR_H          C6_CARD_BAR_H
+#define CARD_CAPTION_DY     C6_CARD_CAPTION_DY
+#define PILL_PAD_X          C6_PILL_PAD_X
+#define PILL_PAD_Y          C6_PILL_PAD_Y
+
 /* Message screens (setup, auth error): body text and its three baselines.
  * Scaled like everything else rather than hardcoded -- these were literals
  * (32px at y=118/152/182) and so stayed S3-sized on the C6 panel. */
@@ -69,6 +82,26 @@
 #define SIZE_FOOTER         S3_SIZE_FOOTER
 #define SIZE_HERO_MAX       S3_SIZE_HERO_MAX
 #define SIZE_HERO_MIN       S3_SIZE_HERO_MIN
+
+/*
+ * Card layout, S3 values.
+ *
+ * The card is a 480x480 design and is not used on the S3, but the constants
+ * must exist for both targets: screens.c is compiled once for both, and the
+ * host suite builds against this branch. Scaled down proportionally so a
+ * render here is at least coherent rather than off-panel.
+ */
+#define CARD_Y              (38)
+#define CARD_H              (150)
+#define CARD_RADIUS         (8)
+#define CARD_PAD            (14)
+#define CARD_SUBTITLE_DY    (11)
+#define CARD_HERO_BASELINE_DY (95)
+#define CARD_BAR_DY         (110)
+#define CARD_BAR_H          (7)
+#define CARD_CAPTION_DY     (124)
+#define PILL_PAD_X          (8)
+#define PILL_PAD_Y          (3)
 
 /* Message screens (setup, auth error). The S3 originals. */
 #define SIZE_MESSAGE        (32)
@@ -112,6 +145,22 @@
 #define COLOR_INACTIVE  0x3A3A37  /* unfilled rotation dots */
 #define COLOR_GREEN     0x5DCAA5  /* realized gains ONLY (spec 4.2) */
 #define COLOR_AMBER     0xEF9F27  /* degraded states ONLY (spec 4.2) */
+
+/*
+ * Card surfaces, added for the 480x480 card layout.
+ *
+ * Both sit just above the field rather than at a mid grey. On an emissive
+ * panel a lit pixel costs power and a black one costs none, so a card that
+ * reads as "raised" at #1A1A18 is nearly free, where a conventional #2E2E2C
+ * card would light a third of the screen for the same visual job.
+ *
+ * UNVERIFIED on this panel, like COLOR_BG above: near-black separation is
+ * exactly what the S3's IPS panel could not render, and these were chosen on
+ * an AMOLED's expected behaviour rather than a measured ramp. Run colortest.c
+ * before trusting the gap between BG, CARD and TRACK.
+ */
+#define COLOR_CARD      0x1A1A18  /* card fill -- UNVERIFIED, see above */
+#define COLOR_TRACK     0x2A2A28  /* unfilled bar track */
 
 /*
  * Red. Spec 4.2 keeps this out of the base palette, adding it "only for

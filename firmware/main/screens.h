@@ -17,6 +17,9 @@
  * Data for a rotation screen (spec 6.1). Strings are borrowed, not copied;
  * they must outlive the draw call.
  */
+/* Most dots the deck can show -- one per defined screen. */
+#define SCREENS_MAX_DOTS 10
+
 typedef struct {
     const char *label;      /* "MRR", "NEW PAID", ... -- rendered at 20px */
     const char *hero;       /* the value; size computed from its width */
@@ -33,6 +36,43 @@ typedef struct {
  * Clears any existing children first, so screens can be swapped in place.
  */
 void screen_draw_rotation(lv_obj_t *scr, const screen_data_t *data);
+
+/*
+ * Data for the card layout (the 480x480 deck).
+ *
+ * The delta fields are separate from the strings on purpose: `has_delta` is
+ * the honesty gate. Until the device has accumulated enough daily samples to
+ * know a direction, the bar and pill render in their "collecting" state
+ * rather than showing a number nobody measured.
+ */
+typedef struct {
+    const char *label;       /* "MRR" */
+    const char *hero;        /* "$1,106.33" */
+    const char *subtitle;    /* "33 active" */
+
+    _Bool has_delta;         /* false: not enough history yet */
+    const char *delta;       /* "+4.2%" -- ignored unless has_delta */
+    const char *comparison;  /* "vs $1,061 last month", or the collecting note */
+    _Bool delta_is_gain;     /* green vs red; realized movement only (spec 4.2) */
+    int fill_pct;            /* bar fill 0-100 -- ignored unless has_delta */
+
+    int dot_index;
+    int dot_count;
+} card_data_t;
+
+/*
+ * Draw the card layout: hero plus context bar.
+ *
+ * Replaces the three-zone skeleton on this panel. That skeleton was shaped by
+ * the S3's 240x240, where a hero at its legibility floor left room for little
+ * else; at 480x480 it leaves ~200px of dead band between the label and the
+ * number. The card spends that band on the one thing a bare figure cannot
+ * say: which way it is going.
+ *
+ * The hero keeps its computed size. The floor is stated in millimetres at
+ * 50cm (spec 2.2) and is not available to trade for layout.
+ */
+void screen_draw_card(lv_obj_t *scr, const card_data_t *data);
 
 /*
  * State A: stale (spec 6.2). All values dim to muted, the age shows in amber,
