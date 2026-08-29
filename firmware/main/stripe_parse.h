@@ -14,6 +14,13 @@
 
 /* Bounded so a large account cannot exhaust memory mid-parse. Spec 7.1 uses
  * limit=100 per page, and each subscription rarely has more than a few items. */
+/*
+ * Stripe object ids are short ("sub_1P2x..."), but the cursor must never be
+ * truncated: a clipped id asks Stripe to resume from something that does not
+ * exist, which silently skips subscriptions and under-reports MRR.
+ */
+#define STRIPE_ID_LEN 64
+
 #define STRIPE_MAX_SUBS  128
 #define STRIPE_MAX_ITEMS 512
 
@@ -23,6 +30,16 @@ typedef struct {
     int sub_count;
     int item_count;
     bool has_more;      /* Stripe's has_more: another page exists */
+
+    /*
+     * Id of the LAST subscription seen in this page, for
+     * starting_after on the next request. Empty when the page was empty.
+     *
+     * "Last seen", not "last stored": subscriptions with statuses that do not
+     * count toward MRR are skipped, and if one of those ends the page, paging
+     * from the last stored id would resume too early and loop forever.
+     */
+    char last_id[STRIPE_ID_LEN];
     bool truncated;     /* we hit our own limits and dropped data */
 } stripe_subs_t;
 

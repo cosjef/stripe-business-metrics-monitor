@@ -26,6 +26,7 @@
 #include "layout.h"
 #include "hero_size.h"
 #include "screens.h"
+#include "axp2101.h"
 #include "battery.h"
 #include "state.h"
 #include "settings.h"
@@ -1029,6 +1030,17 @@ static void run_normal_mode(void)
 
 void app_main(void)
 {
+    /*
+     * PMIC first. On this board the AXP2101 gates the panel's power rails, so
+     * display_init() must not run before it -- otherwise the panel comes up,
+     * logs success, and emits no light. Not fatal if it fails: a warning is
+     * more useful than an abort, since everything except the screen still
+     * works and the log will say why.
+     */
+    if (axp2101_init() != ESP_OK) {
+        ESP_LOGW(TAG, "PMIC init failed; the display will likely stay dark");
+    }
+
     ESP_ERROR_CHECK(display_init());
     ESP_ERROR_CHECK(settings_init());
 

@@ -14,7 +14,7 @@ dependencies:
       type: service
     version: 4.2.0
   espressif/cmake_utilities:
-    component_hash: 05165f30922b422b4b90c08845e6d449329b97370fbd06309803d8cb539d79e3
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
     dependencies:
     - name: idf
       require: private
@@ -22,7 +22,31 @@ dependencies:
     source:
       registry_url: https://components.espressif.com
       type: service
-    version: 1.1.1
+    version: 0.5.3
+  espressif/esp_lcd_sh8601:
+    component_hash: 18245cd23204eefb67f61b362405f78364fa13b13cdedda5f7546d89701c506b
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 2.0.1~1
+  espressif/esp_lcd_touch:
+    component_hash: 3f85a7d95af876f1a6ecca8eb90a81614890d0f03a038390804e5a77e2caf862
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com
+      type: service
+    version: 1.2.1
   espressif/esp_lvgl_port:
     component_hash: d3c020b45c3dfc0d1706a83b63a1c34a6eb444a6e935f9afff79f92b7b94dcef
     dependencies:
@@ -48,11 +72,27 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 9.5.0
+  waveshare/esp_lcd_touch_cst9217:
+    component_hash: 27a00845832b7987cacf4c4125cbed5415d940987583065b01870ac080930856
+    dependencies:
+    - name: espressif/esp_lcd_touch
+      registry_url: https://components.espressif.com
+      require: public
+      version: ^1.1.0
+    - name: idf
+      require: private
+      version: '>=4.4.2'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.4
 direct_dependencies:
 - espressif/button
+- espressif/esp_lcd_sh8601
 - espressif/esp_lvgl_port
 - idf
 - lvgl/lvgl
-manifest_hash: 9b3f2da7b25507fe6f55e379db10a574e50e18f4be63b4ab171e37abb203b82f
-target: esp32s3
+- waveshare/esp_lcd_touch_cst9217
+manifest_hash: 08b3a6298366b866e9f9a044180a6397e45aa6e7422a2e872abb247409e8dbf3
+target: esp32c6
 version: 2.0.0

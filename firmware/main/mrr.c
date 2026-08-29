@@ -6,6 +6,8 @@
  */
 #include "mrr.h"
 
+#include <stdio.h>
+
 #include <string.h>
 
 mrr_interval_t mrr_interval_from_str(const char *s)
@@ -155,4 +157,34 @@ int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count)
     /* Truncate rather than round: on a revenue display, understating
      * per-customer value is the safer direction to err. */
     return mrr_cents / active_count;
+}
+
+void mrr_totals_merge(mrr_totals_t *acc, const mrr_totals_t *page)
+{
+    acc->mrr_cents    += page->mrr_cents;
+    acc->active_count += page->active_count;
+    acc->trial_count  += page->trial_count;
+    acc->tiered_count += page->tiered_count;
+
+    /* Latches: one page seeing tiered pricing means the account has it. */
+    acc->has_tiered     = acc->has_tiered || page->has_tiered;
+    acc->mixed_currency = acc->mixed_currency || page->mixed_currency;
+
+    /* A page with no subscriptions carries no currency; adopting its empty
+     * string would blank what earlier pages established. */
+    if (page->currency[0] == '\0') {
+        return;
+    }
+
+    if (acc->currency[0] == '\0') {
+        snprintf(acc->currency, sizeof(acc->currency), "%s", page->currency);
+        return;
+    }
+
+    /* Different currency from an earlier page: the account is mixed even
+     * though no single page looked it. Keep the first currency seen so the
+     * caller has something to name, but flag the sum as untrustworthy. */
+    if (strcmp(acc->currency, page->currency) != 0) {
+        acc->mixed_currency = true;
+    }
 }

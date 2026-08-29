@@ -35,6 +35,15 @@ static void check_int(const char *what, int got, int want)
     }
 }
 
+static void check_str(const char *what, const char *got, const char *want)
+{
+    checks++;
+    if (strcmp(got, want) != 0) {
+        failures++;
+        printf("  FAIL %s: got \"%s\", want \"%s\"\n", what, got, want);
+    }
+}
+
 static void check_true(const char *what, int cond)
 {
     checks++;
@@ -429,6 +438,113 @@ static void test_arpu(void)
     check_i64("truncates rather than rounds up", mrr_arpu_cents(1099, 10), 109);
 }
 
+/*
+ * Folding totals across pages.
+ *
+ * Pagination is not optional on the C6: the heap allows two subscriptions per
+ * request. My first attempt accumulated every subscription and computed MRR
+ * once at the end, which needed a 5KB array plus a 25KB parse buffer held for
+ * the whole loop -- and that fragmentation dropped the largest free block from
+ * 35KB to 14KB, so the response buffer could no longer be allocated at all.
+ * The fix is to fold each page's totals into a running sum and keep nothing
+ * else.
+ *
+ * Most fields simply add. Two do not, and they are what this tests:
+ * mixed_currency must latch across pages, and the currency itself must be
+ * compared BETWEEN pages, not just within one -- an account whose first page
+ * is USD and second is EUR is mixed, even though neither page alone is.
+ */
+static void test_totals_merge_across_pages(void)
+{
+    printf("totals fold across pages\n");
+
+    mrr_totals_t acc = {0};
+    mrr_totals_t page1 = {
+        .mrr_cents = 5000, .active_count = 2, .trial_count = 1,
+        .currency = "usd",
+    };
+    mrr_totals_t page2 = {
+        .mrr_cents = 3000, .active_count = 1, .trial_count = 0,
+        .currency = "usd",
+    };
+
+    mrr_totals_merge(&acc, &page1);
+    check_i64("first page sets the total", acc.mrr_cents, 5000);
+    check_int("and the counts", acc.active_count, 2);
+
+    mrr_totals_merge(&acc, &page2);
+    check_i64("second page adds", acc.mrr_cents, 8000);
+    check_int("counts add", acc.active_count, 3);
+    check_int("trials add", acc.trial_count, 1);
+    check_str("currency carried", acc.currency, "usd");
+    check_true("not mixed", !acc.mixed_currency);
+}
+
+/*
+ * The case a per-page computation cannot see on its own.
+ */
+static void test_mixed_currency_across_pages(void)
+{
+    printf("currencies differing BETWEEN pages counts as mixed\n");
+
+    mrr_totals_t acc = {0};
+    mrr_totals_t usd = { .mrr_cents = 1000, .active_count = 1, .currency = "usd" };
+    mrr_totals_t eur = { .mrr_cents = 2000, .active_count = 1, .currency = "eur" };
+
+    mrr_totals_merge(&acc, &usd);
+    check_true("one currency is not mixed", !acc.mixed_currency);
+
+    mrr_totals_merge(&acc, &eur);
+    check_true("a second currency makes it mixed", acc.mixed_currency);
+
+    /* And it stays mixed even if later pages agree with the first. */
+    mrr_totals_merge(&acc, &usd);
+    check_true("mixed latches", acc.mixed_currency);
+}
+
+/*
+ * has_tiered and mixed_currency are latches: once any page reports one, the
+ * account has it, and a later clean page must not clear the flag.
+ */
+static void test_flags_latch(void)
+{
+    printf("has_tiered and mixed_currency latch across pages\n");
+
+    mrr_totals_t acc = {0};
+    mrr_totals_t tiered = {
+        .mrr_cents = 1000, .has_tiered = true, .tiered_count = 2,
+        .currency = "usd",
+    };
+    mrr_totals_t clean = { .mrr_cents = 1000, .currency = "usd" };
+
+    mrr_totals_merge(&acc, &tiered);
+    mrr_totals_merge(&acc, &clean);
+
+    check_true("has_tiered stays set", acc.has_tiered);
+    check_int("tiered_count accumulates", acc.tiered_count, 2);
+}
+
+/*
+ * An empty page contributes nothing and must not clobber what came before --
+ * in particular it must not blank the currency.
+ */
+static void test_empty_page_is_harmless(void)
+{
+    printf("an empty page changes nothing\n");
+
+    mrr_totals_t acc = {0};
+    mrr_totals_t real = { .mrr_cents = 4200, .active_count = 2, .currency = "usd" };
+    mrr_totals_t empty = {0};
+
+    mrr_totals_merge(&acc, &real);
+    mrr_totals_merge(&acc, &empty);
+
+    check_i64("total unchanged", acc.mrr_cents, 4200);
+    check_int("count unchanged", acc.active_count, 2);
+    check_str("currency not blanked", acc.currency, "usd");
+    check_true("not spuriously mixed", !acc.mixed_currency);
+}
+
 int main(void)
 {
     printf("MRR computation tests (spec 7.2)\n\n");
@@ -450,6 +566,11 @@ int main(void)
     test_large_account_no_overflow();
     test_arr();
     test_arpu();
+
+    test_totals_merge_across_pages();
+    test_mixed_currency_across_pages();
+    test_flags_latch();
+    test_empty_page_is_harmless();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

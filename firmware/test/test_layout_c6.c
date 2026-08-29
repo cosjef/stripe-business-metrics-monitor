@@ -236,6 +236,28 @@ static void test_arr_decimal_fits_again(void)
                text_width_px("$970.33", 130) <= C6_TEXT_COLUMN_PX);
 }
 
+/*
+ * Nothing may hardcode a panel dimension.
+ *
+ * draw_dots() centred on a literal 240, so on the 480px panel the dots landed
+ * around x=120 and spilled off the left edge as one wide block. The constant
+ * existed; the drawing code just did not use it.
+ */
+static void test_panel_width_is_a_constant(void)
+{
+    printf("panel width comes from the layout, not a literal\n");
+
+    check_int("C6 panel is 480", C6_PANEL_PX, 480);
+    check_int("S3 panel is 240", S3_PANEL_PX, 240);
+
+    /* The dot row must fit inside the panel it is drawn on. */
+    const int span = (10 - 1) * C6_DOTS_GAP;   /* worst case: 10 screens */
+    const int x0 = (C6_PANEL_PX - span) / 2;
+    check_true("ten dots start inside the left edge", x0 >= 0);
+    check_true("and end inside the right edge",
+               x0 + span + C6_DOTS_RADIUS <= C6_PANEL_PX);
+}
+
 int main(void)
 {
     test_type_sizes_are_physically_derived();
@@ -244,6 +266,7 @@ int main(void)
     test_zones_do_not_overlap();
     test_text_column();
     test_arr_decimal_fits_again();
+    test_panel_width_is_a_constant();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

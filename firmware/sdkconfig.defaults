@@ -1,4 +1,8 @@
-CONFIG_IDF_TARGET="esp32s3"
+CONFIG_IDF_TARGET="esp32c6"
+
+# No PSRAM options: the ESP32-C6 has no hardware support for external RAM,
+# so every buffer competes for the 512KB of internal SRAM. This is why
+# stripe_api.c must paginate rather than buffer whole responses.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
@@ -7,9 +11,6 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 
 # PSRAM: 8MB onboard. Matters later for buffering Stripe API responses
 # (spec 8.3 assumed this was not available; this board has it).
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_SPEED_80M=y
 
 # LVGL: RGB565. The byte swap the panel needs is set via `swap_bytes` in the
 # lvgl_port display config, NOT here -- CONFIG_LV_COLOR_16_SWAP was an LVGL 8
@@ -39,3 +40,11 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_FULL=y
 
 # esp_http_client needs a larger stack for the TLS handshake.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Console over USB Serial/JTAG, not UART0.
+#
+# The C6 connects to the host through its native USB peripheral, and UART0's
+# pins are not broken out to that cable. Leaving the default UART console
+# means the device boots and logs normally into a pin nobody is listening to,
+# which looks exactly like a dead board.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y

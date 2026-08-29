@@ -2,12 +2,14 @@
 
 #include "orientation.h"
 #include "board_config.h"
+#include "layout.h"
 
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#include "esp_lcd_sh8601.h"
 #include "esp_lvgl_port.h"
 
 static const char *TAG = "display";
@@ -24,76 +26,125 @@ lv_display_t *display_handle(void)
 
 void display_backlight(_Bool on)
 {
-    gpio_set_level(LCD_GPIO_BL, on ? LCD_BL_ON_LEVEL : !LCD_BL_ON_LEVEL);
+    /*
+     * No backlight pin on this board. AMOLED pixels emit their own light, so
+     * "off" means driving the panel off rather than dimming a lamp behind it.
+     * Kept as a no-op for now so callers written for the S3 still compile;
+     * brightness control is a panel command and comes with the AXP2101 work.
+     */
+    (void)on;
 }
+
+
+/*
+ * Bring up the QSPI bus and the AMOLED panel.
+ *
+ * Three differences from the S3's ST7789 worth knowing:
+ *
+ *   - QSPI, not SPI. Four data lines rather than one MOSI, and no DC pin --
+ *     the SH8601 protocol carries command/data selection inside 32-bit
+ *     commands, which is why LCD_CMD_BITS is 32 here and 8 on the S3.
+ *   - No reset GPIO. Panel reset is a command over the bus.
+ *   - No backlight GPIO. AMOLED pixels emit their own light; brightness is a
+ *     panel command, and black pixels are simply off.
+ */
+
+/*
+ * CO5300 vendor init sequence, from Waveshare's own example for this board
+ * (09_LVGL_V9_Test/components/port_bsp/display_bsp.cpp).
+ *
+ * The generic SH8601 driver brings the panel up but sends none of these, and
+ * one of them is the difference between a working display and a black one:
+ *
+ *     {0x51, 0xFF}  -- display brightness, full
+ *
+ * On an AMOLED, brightness defaults to zero. Without this the panel
+ * initialises correctly, LVGL renders correctly, and the screen stays black
+ * because no pixel is emitting light. There is no backlight to check, which
+ * makes it a confusing failure: everything logs success.
+ *
+ * The rest sets sleep-out, pixel format (0x3A = RGB565), the address window
+ * for 480x480 (0x2A/0x2B, 0x01DF = 479), and display-on.
+ */
+static const sh8601_lcd_init_cmd_t co5300_init_cmds[] = {
+    {0x11, (uint8_t[]){0x00}, 0, 600},   /* sleep out, 600ms settle */
+    {0xFE, (uint8_t[]){0x20}, 1, 0},     /* page select */
+    {0x19, (uint8_t[]){0x10}, 1, 0},
+    {0x1C, (uint8_t[]){0xA0}, 1, 0},
+    {0xFE, (uint8_t[]){0x00}, 1, 0},     /* back to user page */
+    {0xC4, (uint8_t[]){0x80}, 1, 0},
+    {0x3A, (uint8_t[]){0x55}, 1, 0},     /* 16bpp RGB565 */
+    {0x35, (uint8_t[]){0x00}, 1, 0},     /* tearing effect on */
+    /*
+     * MADCTL 0x00, not 0x30.
+     *
+     * Waveshare's sequence uses 0x30, which sets MV (transpose) and MX
+     * (mirror-X). That rotates the image 90 degrees in the panel, and the
+     * SH8601 driver then refuses swap_xy, so there is no way to undo it --
+     * the deck rendered sideways.
+     *
+     * Clawdmeter reached the same conclusion independently: "we deliberately
+     * do NOT restore the old MADCTL 0x30 (MV transpose)."
+     */
+    {0x36, (uint8_t[]){0x00}, 1, 0},     /* memory access control, no transpose */
+    {0x53, (uint8_t[]){0x20}, 1, 0},     /* brightness control on */
+    {0x51, (uint8_t[]){0xFF}, 1, 0},     /* brightness FULL -- see above */
+    {0x63, (uint8_t[]){0xFF}, 1, 0},
+    {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},  /* col 0..479 */
+    {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},  /* row 0..479 */
+    {0x29, (uint8_t[]){0x00}, 0, 100},   /* display on */
+};
 
 static esp_err_t lcd_init(void)
 {
-    esp_err_t ret = ESP_OK;
-
-    const gpio_config_t bk_gpio_config = {
-        .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = 1ULL << LCD_GPIO_BL,
-    };
-    ESP_RETURN_ON_ERROR(gpio_config(&bk_gpio_config), TAG, "backlight gpio failed");
-
-    ESP_LOGI(TAG, "initializing SPI bus");
-    const spi_bus_config_t buscfg = {
-        .sclk_io_num = LCD_GPIO_SCLK,
-        .mosi_io_num = LCD_GPIO_MOSI,
-        .miso_io_num = GPIO_NUM_NC,
-        .quadwp_io_num = GPIO_NUM_NC,
-        .quadhd_io_num = GPIO_NUM_NC,
+    const spi_bus_config_t bus_cfg = {
+        .sclk_io_num = LCD_GPIO_PCLK,
+        .data0_io_num = LCD_GPIO_DATA0,
+        .data1_io_num = LCD_GPIO_DATA1,
+        .data2_io_num = LCD_GPIO_DATA2,
+        .data3_io_num = LCD_GPIO_DATA3,
         .max_transfer_sz = LCD_H_RES * LCD_DRAW_BUFF_HEIGHT * sizeof(uint16_t),
+        .flags = SPICOMMON_BUSFLAG_MASTER | SPICOMMON_BUSFLAG_QUAD,
     };
-    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_SPI_NUM, &buscfg, SPI_DMA_CH_AUTO),
-                        TAG, "SPI init failed");
+    ESP_RETURN_ON_ERROR(spi_bus_initialize(LCD_SPI_NUM, &bus_cfg, SPI_DMA_CH_AUTO),
+                        TAG, "QSPI bus init failed");
 
-    ESP_LOGI(TAG, "installing panel IO");
-    const esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = LCD_GPIO_DC,
-        .cs_gpio_num = LCD_GPIO_CS,
-        .pclk_hz = LCD_PIXEL_CLK_HZ,
-        .lcd_cmd_bits = LCD_CMD_BITS,
-        .lcd_param_bits = LCD_PARAM_BITS,
-        .spi_mode = 0,
-        .trans_queue_depth = 10,
+    const esp_lcd_panel_io_spi_config_t io_cfg =
+        SH8601_PANEL_IO_QSPI_CONFIG(LCD_GPIO_CS, NULL, NULL);
+
+    ESP_RETURN_ON_ERROR(
+        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_NUM,
+                                 &io_cfg, &s_lcd_io),
+        TAG, "panel IO init failed");
+
+    const sh8601_vendor_config_t vendor_cfg = {
+        .init_cmds = co5300_init_cmds,
+        .init_cmds_size = sizeof(co5300_init_cmds) / sizeof(co5300_init_cmds[0]),
+        .flags = { .use_qspi_interface = 1 },
     };
-    ESP_GOTO_ON_ERROR(
-        esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_NUM, &io_config, &s_lcd_io),
-        err, TAG, "new panel IO failed");
 
-    ESP_LOGI(TAG, "installing ST7789 driver");
-    const esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = LCD_GPIO_RST,
-        .color_space = ESP_LCD_COLOR_SPACE_RGB,
+    const esp_lcd_panel_dev_config_t panel_cfg = {
+        .reset_gpio_num = LCD_GPIO_RST,   /* GPIO_NUM_NC: reset is a command */
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = LCD_BITS_PER_PIXEL,
+        .vendor_config = (void *)&vendor_cfg,
     };
-    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7789(s_lcd_io, &panel_config, &s_lcd_panel),
-                      err, TAG, "new panel failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_new_panel_sh8601(s_lcd_io, &panel_cfg, &s_lcd_panel),
+                        TAG, "SH8601 panel init failed");
 
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_lcd_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_lcd_panel));
-    /* Required for this panel. Confirmed against Waveshare's own example, and
-     * confirmed on glass: setting this false renders a fully inverted image
-     * (white field, dark text). */
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_lcd_panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_lcd_panel, true));
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_lcd_panel), TAG, "panel reset failed");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_lcd_panel), TAG, "panel init failed");
 
-    display_backlight(true);
-    return ret;
+    /*
+     * No invert_color here. The S3's ST7789 needed invert_color(true), proven
+     * on glass after five wrong attempts. Whether this panel needs it is
+     * unknown until colortest runs -- do not copy the S3 value on faith.
+     */
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_lcd_panel, true),
+                        TAG, "display on failed");
 
-err:
-    if (s_lcd_panel) {
-        esp_lcd_panel_del(s_lcd_panel);
-        s_lcd_panel = NULL;
-    }
-    if (s_lcd_io) {
-        esp_lcd_panel_io_del(s_lcd_io);
-        s_lcd_io = NULL;
-    }
-    spi_bus_free(LCD_SPI_NUM);
-    return ret;
+    ESP_LOGI(TAG, "SH8601 QSPI panel up at %dx%d", LCD_H_RES, LCD_V_RES);
+    return ESP_OK;
 }
 
 static esp_err_t lvgl_init(void)
@@ -134,10 +185,20 @@ static esp_err_t lvgl_init(void)
         },
         .flags = {
             .buff_dma = true,
-            /* RGB565 over SPI needs the byte order swapped for this panel.
-             * This is the ONLY place it happens: CONFIG_LV_COLOR_16_SWAP was
-             * an LVGL 8 option and does not exist in LVGL 9, so setting it in
-             * sdkconfig has no effect. */
+            /*
+             * Byte order. The S3's ST7789 needed this true, confirmed on
+             * glass. Whether the SH8601 does is unverified -- colortest will
+             * say. Starting from Waveshare's example, which does not swap.
+             */
+            /*
+             * Byte-swapped. LVGL writes RGB565 little-endian; this panel wants
+             * it the other way, and without the swap the high and low bytes
+             * land in the wrong channels -- off-white renders magenta and the
+             * green accent renders blue. Changing rgb_ele_order to BGR does
+             * NOT fix that: the fault is byte order within the pixel, not
+             * channel order within the field. Tried BGR first and it was
+             * worse.
+             */
             .swap_bytes = true,
         },
     };
@@ -152,6 +213,10 @@ esp_err_t display_init(void)
 {
     ESP_RETURN_ON_ERROR(lcd_init(), TAG, "LCD init failed");
     ESP_RETURN_ON_ERROR(lvgl_init(), TAG, "LVGL init failed");
-    ESP_LOGI(TAG, "display ready: %dx%d", LCD_H_RES, LCD_V_RES);
+    /* State the geometry actually compiled in. The per-target #ifdefs are
+     * easy to get wrong and impossible to confirm from the glass, so the
+     * device says which set it is using. */
+    ESP_LOGI(TAG, "display ready: %dx%d, panel %d, hero cap %dpx, column %dpx",
+             LCD_H_RES, LCD_V_RES, PANEL_PX, SIZE_HERO_MAX, TEXT_COLUMN_PX);
     return ESP_OK;
 }

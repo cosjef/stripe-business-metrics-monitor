@@ -39,9 +39,19 @@ FONT="$HERE/fonts/RobotoCondensed-Bold.ttf"
 OUT="$(cd "$HERE/.." && pwd)/main/fonts"
 
 # Hero sizes must match hero_font_sizes[] in main/hero_size.c.
+# S3 hero ladder (240x240, ~220 PPI).
 HERO_SIZES=(24 32 40 52 60 64 76 88 96)
+
+# C6 hero ladder (480x480, ~314 PPI). NOT the S3 list doubled: the C6 is 2x the
+# pixels but only 1.4x the physical size, so each size is the S3 value scaled by
+# the density ratio (~1.43) to keep the same millimetre height. Derived in
+# geometry.c and asserted in test_layout_c6.c.
+C6_HERO_SIZES=(35 46 58 74 86 92 108 126 137)
 # Footer (18), label (20), subtitle (22).
 UI_SIZES=(18 20 22)
+
+# C6 chrome sizes, same physical derivation.
+C6_UI_SIZES=(26 29 31)
 
 # Glyph range: space through 'z'. Matches the advance table in hero_size.c.
 RANGE="0x20-0x7A"
@@ -79,6 +89,8 @@ for s in "${HERO_SIZES[@]}"; do gen "$s"; done
 
 echo "generating UI fonts..."
 for s in "${UI_SIZES[@]}"; do gen "$s"; done
+for s in "${C6_HERO_SIZES[@]}"; do gen "$s"; done
+for s in "${C6_UI_SIZES[@]}"; do gen "$s"; done
 
 echo
 echo "done. total size:"

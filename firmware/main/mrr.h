@@ -81,6 +81,25 @@ typedef struct {
 } mrr_totals_t;
 
 /*
+ * Fold one page's totals into a running accumulator.
+ *
+ * Pagination means MRR is computed per page and summed, rather than over the
+ * whole account at once -- on a board with no PSRAM, holding every
+ * subscription to compute once at the end costs more memory than the response
+ * buffer it displaces.
+ *
+ * Most fields add. Two do not:
+ *
+ *   mixed_currency  latches, and must also compare currencies BETWEEN pages:
+ *                   a USD first page and a EUR second page is a mixed account
+ *                   even though neither page alone looks mixed.
+ *   has_tiered      latches; a later clean page must not clear it.
+ *
+ * An empty page contributes nothing and must not blank the currency.
+ */
+void mrr_totals_merge(mrr_totals_t *acc, const mrr_totals_t *page);
+
+/*
  * Monthly value of a single item, in cents, before any discount.
  * Returns 0 for non-recurring, tiered, or unknown-interval items.
  */

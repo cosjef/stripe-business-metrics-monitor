@@ -85,7 +85,6 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
                           int32_t id, void *data)
 {
     (void)arg;
-    (void)data;
 
     if (base == WIFI_EVENT) {
         switch (id) {
@@ -93,13 +92,22 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
             esp_wifi_connect();
             break;
 
-        case WIFI_EVENT_STA_DISCONNECTED:
+        case WIFI_EVENT_STA_DISCONNECTED: {
+            /*
+             * The reason code is the difference between "wrong password" and
+             * "the AP dropped us", which look identical from the outside. The
+             * driver hands it over and we were throwing it away.
+             */
+            const wifi_event_sta_disconnected_t *d =
+                (const wifi_event_sta_disconnected_t *)data;
+            const int reason = d ? d->reason : 0;
+
             wifi_retry_on_disconnect(&s_retry);
 
             if (wifi_retry_should_reconnect(&s_retry)) {
                 const int delay_ms = wifi_retry_delay_ms(&s_retry);
-                ESP_LOGW(TAG, "disconnected (fail %d%s), reconnecting in %dms",
-                         s_retry.consecutive_fails,
+                ESP_LOGW(TAG, "disconnected reason=%d (fail %d%s), reconnecting in %dms",
+                         reason, s_retry.consecutive_fails,
                          wifi_retry_ever_connected(&s_retry) ? ", known-good creds"
                                                              : ", provisioning",
                          delay_ms);
@@ -108,12 +116,13 @@ static void on_wifi_event(void *arg, esp_event_base_t base,
             } else {
                 /* Only reachable during provisioning: a device that has held
                  * an IP never gives up. */
-                ESP_LOGE(TAG, "giving up after %d attempts (never connected; "
-                         "credentials are probably wrong)",
-                         WIFI_PROVISION_MAX_RETRIES);
+                ESP_LOGE(TAG, "giving up after %d attempts, last reason=%d "
+                         "(never connected; credentials are probably wrong)",
+                         WIFI_PROVISION_MAX_RETRIES, reason);
                 s_state = WIFI_STATE_FAILED;
             }
             break;
+        }
 
         case WIFI_EVENT_AP_STACONNECTED:
             ESP_LOGI(TAG, "client joined the setup AP");

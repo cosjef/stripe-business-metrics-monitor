@@ -5,6 +5,7 @@
 
 #include "cJSON.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* Read an integer that Stripe may omit or send as null. */
@@ -141,6 +142,16 @@ bool stripe_parse_subscriptions(const char *json, stripe_subs_t *out)
         if (out->sub_count >= STRIPE_MAX_SUBS) {
             out->truncated = true;
             break;
+        }
+
+        /*
+         * Record the cursor before the status filter, so a page ending in a
+         * cancelled subscription still advances. Rejected rather than
+         * truncated if it somehow will not fit -- see STRIPE_ID_LEN.
+         */
+        const char *id = json_str(sub_json, "id");
+        if (id != NULL && strlen(id) < sizeof(out->last_id)) {
+            snprintf(out->last_id, sizeof(out->last_id), "%s", id);
         }
 
         bool trialing = false;

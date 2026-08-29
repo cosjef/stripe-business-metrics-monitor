@@ -35,6 +35,15 @@ static void check_i64(const char *what, int64_t got, int64_t want)
     }
 }
 
+static void check_str(const char *what, const char *got, const char *want)
+{
+    checks++;
+    if (strcmp(got, want) != 0) {
+        failures++;
+        printf("  FAIL %s: got \"%s\", want \"%s\"\n", what, got, want);
+    }
+}
+
 static void check_true(const char *what, int cond)
 {
     checks++;
@@ -291,6 +300,118 @@ static void test_empty_account(void)
     check_i64("zero MRR", t.mrr_cents, 0);
 }
 
+/*
+ * The pagination cursor.
+ *
+ * Stripe pages with starting_after=<last object id>, so the fetch loop needs
+ * the id of the final subscription in each page. The parser previously kept
+ * only the eight fields MRR needs and discarded ids entirely, which made
+ * pagination impossible -- and pagination is not optional on the C6, where the
+ * heap allows only two subscriptions per request.
+ *
+ * The rules that matter: the cursor must be the LAST id in the page (Stripe
+ * orders newest-first and starting_after means "after this one"), it must be
+ * empty when there is nothing to page from, and it must never be a truncated
+ * id -- a short id would silently skip subscriptions and under-report MRR.
+ */
+static void test_pagination_cursor(void)
+{
+    printf("the last subscription's id is captured for starting_after\n");
+
+    stripe_subs_t out;
+
+    /* Three subscriptions: the cursor must be the third. */
+    const char *body =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"sub_aaa\",\"status\":\"active\",\"items\":{\"data\":["
+        "{\"price\":{\"unit_amount\":1000,\"currency\":\"usd\","
+        "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}},"
+        "\"quantity\":1}]}},"
+        "{\"id\":\"sub_bbb\",\"status\":\"active\",\"items\":{\"data\":["
+        "{\"price\":{\"unit_amount\":2000,\"currency\":\"usd\","
+        "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}},"
+        "\"quantity\":1}]}},"
+        "{\"id\":\"sub_ccc\",\"status\":\"active\",\"items\":{\"data\":["
+        "{\"price\":{\"unit_amount\":3000,\"currency\":\"usd\","
+        "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}},"
+        "\"quantity\":1}]}}]}";
+
+    check_true("parses", stripe_parse_subscriptions(body, &out));
+    check_int("three subscriptions", out.sub_count, 3);
+    check_str("cursor is the LAST id, not the first", out.last_id, "sub_ccc");
+    check_true("has_more surfaced", out.has_more);
+
+    /* An empty page leaves no cursor: paging from "" would restart the list. */
+    stripe_subs_t empty;
+    check_true("empty list parses",
+               stripe_parse_subscriptions(
+                   "{\"object\":\"list\",\"has_more\":false,\"data\":[]}", &empty));
+    check_int("no subscriptions", empty.sub_count, 0);
+    check_str("and no cursor", empty.last_id, "");
+}
+
+/*
+ * A subscription that is skipped (cancelled, incomplete) still advances the
+ * cursor.
+ *
+ * The parser drops statuses that do not count toward MRR. If the last object
+ * in a page is one of those, taking the cursor from the last STORED
+ * subscription rather than the last SEEN one would ask Stripe to resume from
+ * an earlier point, and the same page would come back forever.
+ */
+static void test_cursor_advances_past_skipped(void)
+{
+    printf("skipped subscriptions still advance the cursor\n");
+
+    const char *body =
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"sub_kept\",\"status\":\"active\",\"items\":{\"data\":["
+        "{\"price\":{\"unit_amount\":1000,\"currency\":\"usd\","
+        "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}},"
+        "\"quantity\":1}]}},"
+        "{\"id\":\"sub_cancelled\",\"status\":\"canceled\",\"items\":{\"data\":[]}}]}";
+
+    stripe_subs_t out;
+    check_true("parses", stripe_parse_subscriptions(body, &out));
+    check_int("only the active one counts", out.sub_count, 1);
+    check_str("but the cursor is the last SEEN id",
+              out.last_id, "sub_cancelled");
+}
+
+/*
+ * Ids must never be truncated. Stripe ids are short today, but a silently
+ * clipped cursor would ask to resume from an id that does not exist, and
+ * Stripe would return an error or the wrong page -- under-reporting MRR with
+ * no visible symptom.
+ */
+static void test_long_id_is_not_silently_truncated(void)
+{
+    printf("an over-long id is rejected rather than clipped\n");
+
+    char body[1024];
+    char longid[STRIPE_ID_LEN + 40];
+    memset(longid, 'x', sizeof(longid) - 1);
+    longid[sizeof(longid) - 1] = '\0';
+    memcpy(longid, "sub_", 4);
+
+    snprintf(body, sizeof(body),
+        "{\"object\":\"list\",\"has_more\":true,\"data\":["
+        "{\"id\":\"%s\",\"status\":\"active\",\"items\":{\"data\":["
+        "{\"price\":{\"unit_amount\":1000,\"currency\":\"usd\","
+        "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}},"
+        "\"quantity\":1}]}}]}", longid);
+
+    stripe_subs_t out;
+    stripe_parse_subscriptions(body, &out);
+
+    /* Either it fits or the cursor is empty -- never a half id. */
+    checks++;
+    if (out.last_id[0] != '\0' && strcmp(out.last_id, longid) != 0) {
+        failures++;
+        printf("  FAIL cursor was truncated to \"%s\"\n", out.last_id);
+    }
+}
+
 int main(void)
 {
     printf("Stripe response parsing tests (spec 7.1, 7.2)\n\n");
@@ -303,6 +424,9 @@ int main(void)
     test_tiered_detected();
     test_non_recurring_price();
     test_has_more();
+    test_pagination_cursor();
+    test_cursor_advances_past_skipped();
+    test_long_id_is_not_silently_truncated();
     test_malformed_input();
     test_missing_fields();
     test_empty_account();

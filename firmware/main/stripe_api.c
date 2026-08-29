@@ -15,6 +15,16 @@
 
 static const char *TAG = "stripe";
 
+/*
+ * Where response buffers live. The S3 has 8MB of PSRAM; the C6 has none, and
+ * asking for MALLOC_CAP_SPIRAM there fails outright rather than falling back.
+ */
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+#define STRIPE_BUF_CAPS MALLOC_CAP_DEFAULT
+#else
+#define STRIPE_BUF_CAPS MALLOC_CAP_SPIRAM
+#endif
+
 #define STRIPE_HOST "api.stripe.com"
 #define VALIDATE_URL "https://" STRIPE_HOST "/v1/subscriptions?limit=1"
 
@@ -23,12 +33,51 @@ static const char *TAG = "stripe";
  * full-buffer parse viable (spec 8.3 assumed far less heap). */
 #define VALIDATE_BUF_LEN (16 * 1024)
 
-/* A full subscriptions page. Spec 7.1 sizes this at 200-400KB, and spec 8.3
- * assumed it could not be buffered -- but that assumed ~320KB of heap. This
- * board has 8MB PSRAM, so a full-buffer parse is comfortable. */
-#define SUBS_BUF_LEN (512 * 1024)
-#define SUBS_URL "https://" STRIPE_HOST \
-                 "/v1/subscriptions?status=all&limit=100&expand[]=data.discount"
+/*
+ * No expand[]=data.discount.
+ *
+ * parse_discount reads discount.coupon.percent_off and .amount_off, and Stripe
+ * returns those by default on subscriptions -- the expansion was inflating
+ * every object roughly threefold for data already present. On the S3's PSRAM
+ * that cost nothing; on the C6 it was the difference between a page holding
+ * one subscription and holding many.
+ *
+ * Buffer and page size are per-target because the C6 has no PSRAM: 512KB of
+ * SRAM for everything, and mbedTLS holds its session memory while the body
+ * arrives, so the largest contiguous block is what matters rather than the
+ * total free.
+ */
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+/*
+ * Seven per page. Measured: ten unexpanded subscriptions overflowed a 12KB
+ * buffer, so each is ~1.2KB rather than the 800 bytes I first estimated.
+ * Seven leaves a quarter of the buffer spare for larger-than-average objects.
+ */
+#define SUBS_PAGE_LIMIT 1
+/*
+ * 12KB, measured not guessed. The largest contiguous block at the moment the
+ * body arrives is ~15.8KB (mbedTLS still holds its session), so a 16KB request
+ * failed by about 500 bytes. 12KB leaves headroom, and unexpanded
+ * subscriptions are ~800 bytes each, so ten fit comfortably.
+ */
+#define SUBS_BUF_LEN    (12 * 1024)
+#else
+/*
+ * Seven per page. Measured: ten unexpanded subscriptions overflowed a 12KB
+ * buffer, so each is ~1.2KB rather than the 800 bytes I first estimated.
+ * Seven leaves a quarter of the buffer spare for larger-than-average objects.
+ */
+#define SUBS_PAGE_LIMIT 10
+#define SUBS_BUF_LEN    (512 * 1024)
+#endif
+
+/* Hard stop so a misbehaving has_more cannot loop forever. */
+/* One subscription per page at ~6KB each, so this must exceed the largest
+ * account we intend to support. 160 covers STRIPE_MAX_SUBS with margin. */
+#define SUBS_MAX_PAGES 160
+
+#define SUBS_URL_FMT "https://" STRIPE_HOST \
+                 "/v1/subscriptions?status=all&limit=%d"
 
 /* Stripe is not slow, but a phone-tethered or congested network can be. */
 #define HTTP_TIMEOUT_MS 15000
@@ -80,6 +129,26 @@ static esp_err_t on_http_event(esp_http_client_event_t *evt)
 
     if (evt->event_id != HTTP_EVENT_ON_DATA || r == NULL) {
         return ESP_OK;
+    }
+
+    /*
+     * Allocate on first data, not before the request.
+     *
+     * The TLS handshake needs ~40KB. Holding the response buffer across it
+     * left too little, and the connection failed with ESP_ERR_HTTP_CONNECT --
+     * which reads as a network fault and is really memory exhaustion. By the
+     * time body bytes arrive the handshake is done and its scratch is freed.
+     */
+    if (r->buf == NULL) {
+        r->buf = heap_caps_malloc(r->cap, STRIPE_BUF_CAPS);
+        if (r->buf == NULL) {
+            ESP_LOGE(TAG, "could not allocate %u bytes: %u free, %u largest",
+                     (unsigned)r->cap,
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DEFAULT),
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+            return ESP_FAIL;
+        }
+        r->buf[0] = '\0';
     }
 
     /* Truncate rather than overflow. A truncated body fails to parse, which
@@ -222,82 +291,139 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
     if (s_key[0] == '\0') {
         return STRIPE_ERR_UNAUTHORIZED;
     }
+    /*
+     * Fold each page into a running total rather than collecting every
+     * subscription. An earlier attempt kept them all and computed MRR once at
+     * the end; that held a 25KB parse buffer plus an array for the whole loop,
+     * and the fragmentation left too small a contiguous block for the response
+     * buffer -- so every page failed. Peak memory here is one page.
+     */
+    mrr_totals_t acc = {0};
+    bool any_truncated = false;
+    char cursor[STRIPE_ID_LEN] = "";
+    char prev_cursor[STRIPE_ID_LEN] = "";
+    stripe_result_t result = STRIPE_OK;
 
-    /* PSRAM: this is far too large for internal RAM, and is exactly the
-     * allocation spec 8.3 assumed was impossible on an ESP32. */
-    response_t resp = {
-        .buf = heap_caps_malloc(SUBS_BUF_LEN, MALLOC_CAP_SPIRAM),
-        .len = 0,
-        .cap = SUBS_BUF_LEN,
-    };
-    if (resp.buf == NULL) {
-        ESP_LOGE(TAG, "could not allocate %d bytes for the response", SUBS_BUF_LEN);
-        return STRIPE_ERR_NO_MEMORY;
-    }
-    resp.buf[0] = '\0';
+    for (int page = 0; page < SUBS_MAX_PAGES; page++) {
+        response_t resp = { .buf = NULL, .len = 0, .cap = SUBS_BUF_LEN };
 
-    const esp_http_client_config_t cfg = {
-        .url = SUBS_URL,
-        .method = HTTP_METHOD_GET,
-        .timeout_ms = HTTP_TIMEOUT_MS,
-        .event_handler = on_http_event,
-        .user_data = &resp,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-    };
+        stripe_subs_t *parsed =
+            heap_caps_malloc(sizeof(stripe_subs_t), STRIPE_BUF_CAPS);
+        if (parsed == NULL) {
+            result = STRIPE_ERR_NO_MEMORY;
+            break;
+        }
 
-    esp_http_client_handle_t client = esp_http_client_init(&cfg);
-    if (client == NULL) {
-        heap_caps_free(resp.buf);
-        return STRIPE_ERR_NO_MEMORY;
-    }
+        char subs_url[256];
+        if (cursor[0] == '\0') {
+            snprintf(subs_url, sizeof(subs_url), SUBS_URL_FMT, SUBS_PAGE_LIMIT);
+        } else {
+            snprintf(subs_url, sizeof(subs_url),
+                     SUBS_URL_FMT "&starting_after=%s", SUBS_PAGE_LIMIT, cursor);
+        }
 
-    char auth[STRIPE_KEY_MAX_LEN + 16];
-    snprintf(auth, sizeof(auth), "Bearer %s", s_key);
-    esp_http_client_set_header(client, "Authorization", auth);
+        const esp_http_client_config_t cfg = {
+            .url = subs_url,
+            .method = HTTP_METHOD_GET,
+            .timeout_ms = HTTP_TIMEOUT_MS,
+            .event_handler = on_http_event,
+            .user_data = &resp,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+        };
 
-    const esp_err_t err = esp_http_client_perform(client);
-    stripe_result_t result;
+        esp_http_client_handle_t client = esp_http_client_init(&cfg);
+        if (client == NULL) {
+            heap_caps_free(parsed);
+            result = STRIPE_ERR_NO_MEMORY;
+            break;
+        }
 
-    if (err != ESP_OK) {
-        result = (err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST ||
-                  err == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED)
-                     ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
-        ESP_LOGE(TAG, "fetch failed: %s", esp_err_to_name(err));
+        char auth[STRIPE_KEY_MAX_LEN + 16];
+        snprintf(auth, sizeof(auth), "Bearer %s", s_key);
+        esp_http_client_set_header(client, "Authorization", auth);
+
+        const esp_err_t err = esp_http_client_perform(client);
+        if (err != ESP_OK) {
+            result = (err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST ||
+                      err == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED)
+                         ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
+            ESP_LOGE(TAG, "page %d failed: %s", page, esp_err_to_name(err));
+            esp_http_client_cleanup(client);
+            if (resp.buf) { heap_caps_free(resp.buf); }
+            heap_caps_free(parsed);
+            break;
+        }
+
+        const int status = esp_http_client_get_status_code(client);
+        result = classify_status(status);
         esp_http_client_cleanup(client);
+
+        if (result != STRIPE_OK || resp.buf == NULL) {
+            if (result == STRIPE_OK) {
+                ESP_LOGW(TAG, "HTTP %d but no body on page %d", status, page);
+                result = STRIPE_ERR_BAD_RESPONSE;
+            }
+            if (resp.buf) { heap_caps_free(resp.buf); }
+            heap_caps_free(parsed);
+            break;
+        }
+
+        if (!stripe_parse_subscriptions(resp.buf, parsed)) {
+            ESP_LOGE(TAG, "page %d did not parse (%u bytes)", page,
+                     (unsigned)resp.len);
+            heap_caps_free(resp.buf);
+            heap_caps_free(parsed);
+            result = STRIPE_ERR_BAD_RESPONSE;
+            break;
+        }
+
+        ESP_LOGI(TAG, "subscriptions page %d: %u bytes, %d subs (%u B/sub)%s",
+                 page, (unsigned)resp.len, parsed->sub_count,
+                 parsed->sub_count ? (unsigned)(resp.len / parsed->sub_count) : 0u,
+                 parsed->has_more ? ", more" : "");
+
+        const mrr_totals_t page_totals =
+            mrr_compute(parsed->subs, parsed->sub_count);
+        mrr_totals_merge(&acc, &page_totals);
+        any_truncated = any_truncated || parsed->truncated;
+
+        const bool more = parsed->has_more;
+        const int page_subs = parsed->sub_count;
+        snprintf(cursor, sizeof(cursor), "%s", parsed->last_id);
+
         heap_caps_free(resp.buf);
-        return result;
+        heap_caps_free(parsed);
+
+        /*
+         * Stop on has_more or a missing cursor -- NOT on page_subs == 0.
+         *
+         * A page can legitimately contain zero COUNTABLE subscriptions while
+         * still holding an object: cancelled and incomplete statuses are
+         * parsed for the cursor but excluded from MRR. Treating that as "end
+         * of list" stopped the walk at page 10 of 30 and under-reported by
+         * two thirds. The cursor is what proves progress, so an unchanged
+         * cursor is the real infinite-loop guard.
+         */
+        (void)page_subs;
+        if (!more || cursor[0] == '\0') {
+            break;
+        }
+
+        if (strcmp(cursor, prev_cursor) == 0) {
+            ESP_LOGW(TAG, "cursor did not advance on page %d; stopping", page);
+            break;
+        }
+        snprintf(prev_cursor, sizeof(prev_cursor), "%s", cursor);
     }
-
-    const int status = esp_http_client_get_status_code(client);
-    result = classify_status(status);
-    esp_http_client_cleanup(client);
-
-    ESP_LOGI(TAG, "subscriptions: HTTP %d, %u bytes", status, (unsigned)resp.len);
 
     if (result != STRIPE_OK) {
-        heap_caps_free(resp.buf);
         return result;
     }
 
-    /* The parsed form is large; keep it in PSRAM too rather than on the
-     * caller's stack. */
-    stripe_subs_t *parsed = heap_caps_malloc(sizeof(stripe_subs_t),
-                                             MALLOC_CAP_SPIRAM);
-    if (parsed == NULL) {
-        heap_caps_free(resp.buf);
-        return STRIPE_ERR_NO_MEMORY;
-    }
-
-    if (!stripe_parse_subscriptions(resp.buf, parsed)) {
-        heap_caps_free(parsed);
-        heap_caps_free(resp.buf);
-        return STRIPE_ERR_BAD_RESPONSE;
-    }
-
-    *out = mrr_compute(parsed->subs, parsed->sub_count);
+    *out = acc;
 
     if (truncated) {
-        *truncated = parsed->truncated || parsed->has_more;
+        *truncated = any_truncated;
     }
 
     ESP_LOGI(TAG, "MRR %lld cents, %d active, %d trials%s%s",
@@ -305,8 +431,6 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
              out->has_tiered ? " (tiered present)" : "",
              out->mixed_currency ? " (MIXED CURRENCY)" : "");
 
-    heap_caps_free(parsed);
-    heap_caps_free(resp.buf);
     return STRIPE_OK;
 }
 
@@ -319,8 +443,16 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
  * heartbeat only needs the most recent one. Fewer events also means a much
  * smaller response to pull every 60 seconds.
  */
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+#define EVENTS_BUF_LEN (12 * 1024)
+#else
 #define EVENTS_BUF_LEN (256 * 1024)
+#endif
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+#define MAX_EVENTS 3
+#else
 #define MAX_EVENTS 25
+#endif
 
 stripe_result_t stripe_fetch_events(int64_t since_utc, event_totals_t *out)
 {
@@ -346,7 +478,7 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
              MAX_EVENTS, (long long)fetch_since);
 
     response_t resp = {
-        .buf = heap_caps_malloc(EVENTS_BUF_LEN, MALLOC_CAP_SPIRAM),
+        .buf = heap_caps_malloc(EVENTS_BUF_LEN, STRIPE_BUF_CAPS),
         .len = 0,
         .cap = EVENTS_BUF_LEN,
     };
@@ -366,7 +498,7 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == NULL) {
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return STRIPE_ERR_NO_MEMORY;
     }
 
@@ -377,7 +509,7 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
     const esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         esp_http_client_cleanup(client);
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return (err == ESP_ERR_ESP_TLS_FAILED_CONNECT_TO_HOST ||
                 err == ESP_ERR_MBEDTLS_SSL_HANDSHAKE_FAILED)
                    ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
@@ -388,12 +520,12 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
     esp_http_client_cleanup(client);
 
     if (result != STRIPE_OK) {
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return result;
     }
 
     cJSON *root = cJSON_Parse(resp.buf);
-    heap_caps_free(resp.buf);
+    if (resp.buf) { heap_caps_free(resp.buf); }
 
     if (root == NULL) {
         return STRIPE_ERR_BAD_RESPONSE;
@@ -457,7 +589,11 @@ stripe_result_t stripe_fetch_events_since(int64_t fetch_since,
  * An invoice Stripe has actually attempted has attempt_count > 0, so that is
  * the filter applied below.
  */
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+#define INVOICES_BUF_LEN (12 * 1024)
+#else
 #define INVOICES_BUF_LEN (128 * 1024)
+#endif
 
 stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
 {
@@ -469,7 +605,7 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
     }
 
     response_t resp = {
-        .buf = heap_caps_malloc(INVOICES_BUF_LEN, MALLOC_CAP_SPIRAM),
+        .buf = heap_caps_malloc(INVOICES_BUF_LEN, STRIPE_BUF_CAPS),
         .len = 0,
         .cap = INVOICES_BUF_LEN,
     };
@@ -489,7 +625,7 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
 
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == NULL) {
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return STRIPE_ERR_NO_MEMORY;
     }
 
@@ -500,7 +636,7 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
     const esp_err_t err = esp_http_client_perform(client);
     if (err != ESP_OK) {
         esp_http_client_cleanup(client);
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return STRIPE_ERR_NETWORK;
     }
 
@@ -516,12 +652,12 @@ stripe_result_t stripe_fetch_failed_payments(int *out_count, int64_t *out_cents)
             ESP_LOGW(TAG, "invoices: HTTP %d -- key likely lacks Invoices: Read",
                      status);
         }
-        heap_caps_free(resp.buf);
+        if (resp.buf) { heap_caps_free(resp.buf); }
         return result;
     }
 
     cJSON *root = cJSON_Parse(resp.buf);
-    heap_caps_free(resp.buf);
+    if (resp.buf) { heap_caps_free(resp.buf); }
 
     if (root == NULL) {
         return STRIPE_ERR_BAD_RESPONSE;

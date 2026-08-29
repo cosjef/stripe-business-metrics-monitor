@@ -71,7 +71,10 @@ static void draw_dots(lv_obj_t *parent, int active, int total)
     }
 
     const int span = (total - 1) * DOTS_GAP;
-    const int x0 = (240 - span) / 2;
+    /* PANEL_PX, not a literal: this was hardcoded to 240 and so centred the
+     * dots around x=120 on the 480px panel, drawing them half off the left
+     * edge as one wide smear. */
+    const int x0 = (PANEL_PX - span) / 2;
 
     for (int i = 0; i < total; i++) {
         lv_obj_t *dot = lv_obj_create(parent);
@@ -153,11 +156,13 @@ void screen_draw_auth_error(lv_obj_t *scr, const char *line1, const char *line2,
 
     /* Two lines of plain language, sized to fit rather than at hero scale --
      * this is a sentence, not a number. */
-    label_at_baseline(scr, line1, font_for_size(32), COLOR_PRIMARY, PAD_PX, 118);
-    label_at_baseline(scr, line2, font_for_size(32), COLOR_PRIMARY, PAD_PX, 152);
+    label_at_baseline(scr, line1, font_for_size(SIZE_MESSAGE), COLOR_PRIMARY,
+                      PAD_PX, MSG_LINE1_Y);
+    label_at_baseline(scr, line2, font_for_size(SIZE_MESSAGE), COLOR_PRIMARY,
+                      PAD_PX, MSG_LINE2_Y);
 
     label_at_baseline(scr, hint, font_for_size(SIZE_LABEL), COLOR_MUTED,
-                      PAD_PX, 182);
+                      PAD_PX, MSG_HINT_Y);
 
     /* Error code for support, deliberately quiet. */
     label_at_baseline(scr, errcode, font_for_size(SIZE_FOOTER), COLOR_DIM,
@@ -172,13 +177,15 @@ void screen_draw_setup(lv_obj_t *scr, const char *line1, const char *ssid,
     label_at_top(scr, "SETUP", font_for_size(SIZE_LABEL), COLOR_MUTED,
                  PAD_PX, LABEL_BASELINE_Y);
 
-    label_at_baseline(scr, line1, font_for_size(32), COLOR_PRIMARY, PAD_PX, 118);
+    label_at_baseline(scr, line1, font_for_size(SIZE_MESSAGE), COLOR_PRIMARY,
+                      PAD_PX, MSG_LINE1_Y);
 
     /* The SSID is what the customer must act on, so it gets the accent. */
-    label_at_baseline(scr, ssid, font_for_size(32), COLOR_GREEN, PAD_PX, 152);
+    label_at_baseline(scr, ssid, font_for_size(SIZE_MESSAGE), COLOR_GREEN,
+                      PAD_PX, MSG_LINE2_Y);
 
     label_at_baseline(scr, hint, font_for_size(SIZE_LABEL), COLOR_MUTED,
-                      PAD_PX, 182);
+                      PAD_PX, MSG_HINT_Y);
 
     label_at_baseline(scr, version, font_for_size(SIZE_FOOTER), COLOR_DIM,
                       PAD_PX, FOOTER_BASELINE_Y);

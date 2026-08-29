@@ -45,7 +45,18 @@ int display_orientation_next(int degrees);
 /*
  * The orientation this enclosure ships with.
  *
- * The port is on the side, so this is a quarter turn. Confirmed on glass:
- * a half turn left the text rotated relative to the case.
+ * 0 on the C6. The S3 used 90 because its enclosure put the USB-C port on the
+ * side, but that is a fact about that case and does not carry over.
+ *
+ * It also cannot: the SH8601 driver rejects swap_xy outright --
+ *
+ *     E (516) sh8601: swap_xy is not supported by this panel
+ *
+ * -- so 90 and 270 are unavailable on this hardware regardless of what the
+ * case wants. Only 0 and 180 are reachable, and a half turn is a mirror on
+ * both axes, which the panel does support.
+ *
+ * Set by eye once the enclosure is known. See the note in orientation.c about
+ * the quarter turns being defined but unusable here.
  */
-#define DISPLAY_ROTATION_DEGREES 90
+#define DISPLAY_ROTATION_DEGREES 0

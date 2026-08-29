@@ -5,6 +5,12 @@
  * the host. See hero_size.h for why this measures per glyph rather than using
  * the spec's 0.6em monospace constant.
  */
+/* Only present in the ESP-IDF build; the host harness compiles without it and
+ * falls through to the S3 ladder, which is what the host tests expect. */
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
+
 #include "hero_size.h"
 #include "layout.h"
 
@@ -14,7 +20,16 @@
  * Bitmap font sizes we ship for hero values, ascending.
  * Must stay in sync with tools/gen_fonts.sh and fonts/fonts.c.
  */
+/*
+ * The hero ladder is per-panel. The C6 sizes are not the S3 list doubled: that
+ * panel is 2x the pixels but only 1.4x the physical size, so each step is
+ * scaled by the density ratio to hold the same millimetre height (geometry.c).
+ */
+#ifdef CONFIG_IDF_TARGET_ESP32C6
+const int hero_font_sizes[] = {35, 46, 58, 74, 86, 92, 108, 126, 137};
+#else
 const int hero_font_sizes[] = {24, 32, 40, 52, 60, 64, 76, 88, 96};
+#endif
 const size_t hero_font_sizes_count =
     sizeof(hero_font_sizes) / sizeof(hero_font_sizes[0]);
 
