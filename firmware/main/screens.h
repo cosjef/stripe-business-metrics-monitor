@@ -56,6 +56,20 @@ typedef struct {
     _Bool delta_is_gain;     /* green vs red; realized movement only (spec 4.2) */
     int fill_pct;            /* bar fill 0-100 -- ignored unless has_delta */
 
+    /*
+     * Flow variant: two spans in one run, lost then gained, sharing the bar.
+     *
+     * When has_flow is set the bar shows the period's total movement split by
+     * proportion rather than a single fill, and fill_pct is ignored. A count
+     * of active subscriptions looks identical whether the month added three
+     * or added ten and lost seven; this is what tells them apart.
+     */
+    _Bool has_flow;
+    int flow_gained;
+    int flow_lost;
+    const char *flow_gained_label;   /* "10 joined" */
+    const char *flow_lost_label;     /* "7 left" */
+
     int dot_index;
     int dot_count;
 } card_data_t;

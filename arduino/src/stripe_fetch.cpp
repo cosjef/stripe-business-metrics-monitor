@@ -201,6 +201,19 @@ stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
     }
     jsonstream_init(js);
 
+    /*
+     * Flow window: the last 30 days, matching the rolling window the deck
+     * already uses. Skipped when the clock has not synced -- the scanner then
+     * reports zero flow rather than counting every subscription ever created
+     * as new this month.
+     */
+    {
+        const time_t now = time(NULL);
+        if (now > 1672531200) {          /* 2023-01-01: clock is real */
+            jsonstream_set_window(js, (int64_t)now - 30 * 86400);
+        }
+    }
+
     NetworkClientSecure client;
     /*
      * Verify the server against Stripe's root CA. See stripe_ca.h for which

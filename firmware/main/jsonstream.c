@@ -12,6 +12,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Copy a token into a fixed field, refusing rather than truncating.
+ *
+ * The token buffer holds up to 64 bytes but these fields are much smaller --
+ * a status is 24, a currency 8. A silently clipped value would be worse than
+ * an absent one: "activ" matches no status, but "usd\0..." truncated from a
+ * longer string could match the wrong currency. Anything too long is simply
+ * not ours, so it is dropped.
+ */
+static void copy_field(char *dst, size_t dst_len, const char *src)
+{
+    if (strlen(src) >= dst_len) {
+        return;
+    }
+    memcpy(dst, src, strlen(src) + 1);
+}
+
 static void reset_current(jsonstream_t *js)
 {
     js->cur_id[0] = '\0';
@@ -19,6 +36,8 @@ static void reset_current(jsonstream_t *js)
     js->cur_currency[0] = '\0';
     js->cur_interval[0] = '\0';
     js->cur_unit_amount = 0;
+    js->cur_created = 0;
+    js->cur_ended = 0;
     js->cur_quantity = 1;
     js->cur_interval_count = 1;
     js->cur_subtotal = 0;
@@ -67,8 +86,10 @@ static void finish_item(jsonstream_t *js)
 
     js->cur_subtotal += item_monthly(js);
 
-    /* Reset only the item-scoped fields; id and status belong to the
-     * subscription and outlive its items. */
+    /* Reset only the item-scoped fields; id, status and the created/ended
+     * timestamps belong to the subscription and outlive its items. Clearing
+     * created here silently zeroed the flow counts for every subscription
+     * that had a price -- which is all of them. */
     js->cur_unit_amount = 0;
     js->cur_quantity = 1;
     js->cur_interval_count = 1;
@@ -87,7 +108,30 @@ static void finish_subscription(jsonstream_t *js)
      * that do not count -- otherwise a page ending in a cancelled one would
      * resume from too early a point and loop. */
     if (js->cur_id[0] != '\0') {
-        snprintf(js->last_id, sizeof(js->last_id), "%s", js->cur_id);
+        copy_field(js->last_id, sizeof(js->last_id), js->cur_id);
+    }
+
+    /*
+     * Flow, before the status filter below returns.
+     *
+     * Counted for every subscription regardless of status, because churn
+     * lives on the cancelled ones -- the active-only path never sees them.
+     * Guarded on window_start so a device without a clock reports nothing
+     * rather than counting every subscription ever created as new.
+     */
+    if (js->window_start > 0) {
+        if (js->cur_ended >= js->window_start) {
+            js->totals.churned_count++;
+        } else if (js->cur_created >= js->window_start &&
+                   js->cur_ended == 0) {
+            /*
+             * New only if it is still running. A subscription created and
+             * cancelled inside the same window is churn, not growth; counting
+             * it both ways would make the two figures disagree with the net
+             * the owner can see for themselves.
+             */
+            js->totals.new_count++;
+        }
     }
 
     if (strcmp(js->cur_status, "trialing") == 0) {
@@ -99,8 +143,8 @@ static void finish_subscription(jsonstream_t *js)
 
         if (js->cur_currency[0] != '\0') {
             if (js->totals.currency[0] == '\0') {
-                snprintf(js->totals.currency, sizeof(js->totals.currency),
-                         "%s", js->cur_currency);
+                copy_field(js->totals.currency, sizeof(js->totals.currency),
+                       js->cur_currency);
             } else if (strcmp(js->totals.currency, js->cur_currency) != 0) {
                 /* No rate table on the device: flag rather than add dollars
                  * to euros. */
@@ -141,24 +185,35 @@ static void apply_token(jsonstream_t *js)
     if (strcmp(k, "id") == 0 && js->cur_id[0] == '\0') {
         /* First id inside a subscription is the subscription's own; ids on
          * nested objects (items, prices) arrive later and are ignored. */
-        snprintf(js->cur_id, sizeof(js->cur_id), "%s", v);
+        copy_field(js->cur_id, sizeof(js->cur_id), v);
     } else if (strcmp(k, "status") == 0 && js->cur_status[0] == '\0') {
-        snprintf(js->cur_status, sizeof(js->cur_status), "%s", v);
+        copy_field(js->cur_status, sizeof(js->cur_status), v);
     } else if (strcmp(k, "unit_amount") == 0) {
         js->cur_unit_amount = strtoll(v, NULL, 10);
         js->item_has_price = true;
     } else if (strcmp(k, "quantity") == 0) {
         js->cur_quantity = strtoll(v, NULL, 10);
     } else if (strcmp(k, "interval") == 0) {
-        snprintf(js->cur_interval, sizeof(js->cur_interval), "%s", v);
+        copy_field(js->cur_interval, sizeof(js->cur_interval), v);
         js->item_has_price = true;
     } else if (strcmp(k, "interval_count") == 0) {
         js->cur_interval_count = (int32_t)strtol(v, NULL, 10);
     } else if (strcmp(k, "currency") == 0 && js->cur_currency[0] == '\0') {
-        snprintf(js->cur_currency, sizeof(js->cur_currency), "%s", v);
+        copy_field(js->cur_currency, sizeof(js->cur_currency), v);
+    } else if (strcmp(k, "created") == 0 && js->cur_created == 0) {
+        /* First "created" inside a subscription is its own; prices and items
+         * carry their own later, and those must not overwrite it. */
+        js->cur_created = strtoll(v, NULL, 10);
+    } else if (strcmp(k, "ended_at") == 0) {
+        js->cur_ended = strtoll(v, NULL, 10);
     } else if (strcmp(k, "billing_scheme") == 0) {
         js->cur_tiered = (strcmp(v, "tiered") == 0);
     }
+}
+
+void jsonstream_set_window(jsonstream_t *js, int64_t window_start)
+{
+    js->window_start = window_start;
 }
 
 void jsonstream_feed(jsonstream_t *js, const char *data, size_t len)
@@ -183,7 +238,7 @@ void jsonstream_feed(jsonstream_t *js, const char *data, size_t len)
                     apply_token(js);
                     js->expect_value = false;
                 } else {
-                    snprintf(js->key, sizeof(js->key), "%s", js->token);
+                    copy_field(js->key, sizeof(js->key), js->token);
                 }
                 js->token_len = 0;
                 continue;
@@ -225,8 +280,18 @@ void jsonstream_feed(jsonstream_t *js, const char *data, size_t len)
                 js->token_len = 0;
                 js->expect_value = false;
             }
-            if (js->in_data_array && js->depth == js->data_depth + 3) {
-                /* Closing an item object (data[] > sub > items > data > item). */
+            /*
+             * Item completion is driven by the data seen, not by depth.
+             *
+             * An earlier version closed an item when depth hit a fixed offset
+             * from data_depth, which assumed Stripe nests price objects at a
+             * constant level. On the real account it does not, and the result
+             * was 33 subscriptions counted with zero cents: statuses parsed,
+             * amounts silently dropped. A price is complete once it has both
+             * an amount and an interval, so fold it then.
+             */
+            if (js->in_data_array && js->item_has_price &&
+                js->cur_unit_amount > 0 && js->cur_interval[0] != '\0') {
                 finish_item(js);
             }
             if (js->in_data_array && js->depth == js->data_depth + 1) {

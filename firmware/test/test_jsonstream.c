@@ -255,6 +255,116 @@ static void test_state_is_bounded(void)
                sizeof(jsonstream_t) < 3072);
 }
 
+/*
+ * Subscriber flow: how many joined and how many left in the window.
+ *
+ * A count of active subscriptions looks identical whether the month added
+ * three or added ten and lost seven. The flow is what the PAID SUBS card
+ * draws, and it is also what SCREEN_CANCELLATIONS will need.
+ *
+ * Timestamps are Unix seconds. The window is passed in rather than read from
+ * a clock, because a parser that calls time() cannot be tested: these fixtures
+ * would pass today and fail tomorrow.
+ */
+#define DAY 86400
+#define NOW 1756400000              /* a fixed "now" for the fixtures */
+#define WINDOW_START (NOW - 30 * DAY)
+
+static const char *FLOW_PAGE =
+    "{\"object\":\"list\",\"has_more\":false,\"data\":["
+    /* joined inside the window, still active -> counts as new */
+    "{\"id\":\"sub_new\",\"status\":\"active\",\"created\":1755000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":1000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* joined long before the window -> active, but not new */
+    "{\"id\":\"sub_old\",\"status\":\"active\",\"created\":1700000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":2000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* ended inside the window -> churned, and NOT summed into MRR */
+    "{\"id\":\"sub_gone\",\"status\":\"canceled\",\"created\":1700000000,"
+    "\"ended_at\":1755500000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":3000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* ended long ago -> outside the window, counts for nothing */
+    "{\"id\":\"sub_ancient\",\"status\":\"canceled\",\"created\":1600000000,"
+    "\"ended_at\":1650000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":4000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}}"
+    "]}";
+
+static void test_flow_counts(void)
+{
+    printf("subscriber flow over a window\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_set_window(&js, WINDOW_START);
+    jsonstream_feed(&js, FLOW_PAGE, strlen(FLOW_PAGE));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+
+    check_int("two still active", t->active_count, 2);
+    check_int("one joined in the window", t->new_count, 1);
+    check_int("one left in the window", t->churned_count, 1);
+
+    /* The cancelled subscriptions must not reach MRR, however recently they
+     * ended -- churn is a count, not revenue. */
+    check_i64("only active revenue is summed", t->mrr_cents, 3000);
+}
+
+/*
+ * The same page fed one byte at a time.
+ *
+ * Timestamps are the longest numbers in the document, so they are the most
+ * likely to be split across a chunk boundary -- exactly the failure this
+ * parser exists to survive.
+ */
+static void test_flow_byte_at_a_time(void)
+{
+    printf("flow counts survive byte-at-a-time feeding\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_set_window(&js, WINDOW_START);
+    for (const char *p = FLOW_PAGE; *p; p++) {
+        jsonstream_feed(&js, p, 1);
+    }
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+    check_int("same new count", t->new_count, 1);
+    check_int("same churned count", t->churned_count, 1);
+    check_i64("same MRR", t->mrr_cents, 3000);
+}
+
+/*
+ * With no window set the counts stay zero rather than counting everything.
+ *
+ * A caller without a synced clock has no honest window, and counting every
+ * subscription ever created as "new this month" would be worse than showing
+ * nothing.
+ */
+static void test_flow_without_window(void)
+{
+    printf("no window means no flow counts\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    /* deliberately no jsonstream_set_window */
+    jsonstream_feed(&js, FLOW_PAGE, strlen(FLOW_PAGE));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+    check_int("no new counted", t->new_count, 0);
+    check_int("no churn counted", t->churned_count, 0);
+    check_int("but actives are still counted", t->active_count, 2);
+}
+
 int main(void)
 {
     test_single_chunk();
@@ -264,6 +374,10 @@ int main(void)
     test_interval_normalisation();
     test_braces_inside_strings();
     test_state_is_bounded();
+
+    test_flow_counts();
+    test_flow_byte_at_a_time();
+    test_flow_without_window();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

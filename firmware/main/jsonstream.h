@@ -66,6 +66,8 @@ typedef struct {
     int64_t cur_quantity;
     int32_t cur_interval_count;
     int64_t cur_subtotal;      /* summed items for this subscription */
+    int64_t cur_created;       /* subscription created, Unix seconds */
+    int64_t cur_ended;         /* subscription ended, 0 if it has not */
     bool cur_tiered;
     bool in_subscription;
     bool item_has_price;
@@ -82,9 +84,23 @@ typedef struct {
     bool in_data_array;
     int data_depth;      /* depth at which data[] elements sit */
     bool truncated;      /* a token was too long and was dropped */
+
+    /* Flow window, Unix seconds. 0 means no window and no flow counting. */
+    int64_t window_start;
 } jsonstream_t;
 
 void jsonstream_init(jsonstream_t *js);
+
+/*
+ * Set the flow window: subscriptions created or ended at or after
+ * `window_start` (Unix seconds) are counted as joined or left.
+ *
+ * Optional. Without it new_count and churned_count stay zero, which is the
+ * honest result for a device whose clock has not synced -- counting every
+ * subscription ever created as "new this month" would be worse than showing
+ * nothing. Call after jsonstream_init and before feeding.
+ */
+void jsonstream_set_window(jsonstream_t *js, int64_t window_start);
 
 /* Feed one chunk. Safe to call with any split of the document. */
 void jsonstream_feed(jsonstream_t *js, const char *data, size_t len);

@@ -273,3 +273,49 @@ caught the drift; this does.
 Stage 3: WiFi, NVS settings, captive portal. Stage 4: the streaming Stripe
 fetch (`jsonstream.c`), which is the piece that makes the C6 viable at 912
 bytes resident.
+
+
+---
+
+## UX redesign: parked ideas
+
+The deck's layouts are being reworked for the C6 (the originals are the S3's
+240x240 composition scaled up). Two ideas came out of that work that are worth
+building but are not being built yet.
+
+**Measured on the live account 2026-08-29**, which is what made these look
+worth having: 33 active, +10 new and -7 churned over 30 days (net +3, a 17.5%
+monthly churn rate), median tenure 80 days, and **two subscribers with
+`cancel_at_period_end` set, worth $42/mo**.
+
+### NEXT UP: at-risk revenue -> SCREEN_CANCELLATIONS
+
+Agreed 2026-08-29 as the screen to build after PAID SUBS.
+
+The most actionable fact in the account is that $42/mo has given notice but
+has not left yet. Nothing on the device shows it.
+
+`SCREEN_CANCELLATIONS` already exists in `rotation.h`, already has a
+visibility rule (shown whenever there is data -- zero cancellations in a
+month is itself worth knowing), and already has a label. It is unfilled only
+because nothing computes churn. That is its screen; do not invent a new one.
+
+It should carry both the 30-day churn count and the at-risk figure, because
+"7 left" and "2 more are leaving" are different facts and the second is the
+one that can still be acted on.
+
+### Parked: tenure
+
+Median active tenure (80 days here) is a real measure of stickiness and would
+make a good screen of its own. Deliberately deferred: it drifts rather than
+moves, so it is worth less per rotation slot than flow or churn.
+
+### Rejected: tier composition
+
+A segmented bar of price tiers ($29 x14, $49 x12, $13 x6) was mocked and
+rejected. It renders well and the data is real, but tiers change only when
+the owner reprices -- perhaps twice a year. A glanceable device should
+spend its space on what moves. Kept here so the idea is not re-proposed.
+
+The mock lives in `firmware/test/mock_mrr.c` (render_subs) if it is ever
+wanted.

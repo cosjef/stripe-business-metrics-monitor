@@ -196,6 +196,11 @@ static void draw_setup_screen(const char *line1)
  */
 static char s_delta[16];
 static char s_comparison[FIELD_LEN];
+/* Flow labels for the PAID SUBS card; borrowed by card_data_t, so static. */
+static char s_flow_net[16];
+static char s_flow_gained[16];
+static char s_flow_lost[16];
+static int s_flow_g, s_flow_l;
 static bool s_has_delta;
 static bool s_delta_is_gain;
 static int s_fill_pct;
@@ -275,6 +280,24 @@ static void show(int slot)
      * history to show -- a card with a permanently empty bar would be worse
      * than no card.
      */
+    if (id == SCREEN_PAID_SUBS && (s_flow_g > 0 || s_flow_l > 0)) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_values[id].hero;
+        c.subtitle = s_values[id].subtitle;
+        c.has_flow = true;
+        c.delta = s_flow_net;
+        c.delta_is_gain = (s_flow_g >= s_flow_l);
+        c.flow_gained = s_flow_g;
+        c.flow_lost = s_flow_l;
+        c.flow_gained_label = s_flow_gained;
+        c.flow_lost_label = s_flow_lost;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
     if (id == SCREEN_MRR) {
         card_data_t c = {};
         c.label = s_labels[id];
@@ -359,6 +382,15 @@ static void apply_totals(const mrr_totals_t *t)
 
     record_history(t->mrr_cents);
     update_delta(t->mrr_cents);
+
+    /* Subscriber flow, for the PAID SUBS card. */
+    s_flow_g = t->new_count;
+    s_flow_l = t->churned_count;
+    const int net = s_flow_g - s_flow_l;
+    snprintf(s_flow_net, sizeof(s_flow_net), "net %s%d",
+             net >= 0 ? "+" : "", net);
+    snprintf(s_flow_gained, sizeof(s_flow_gained), "%d joined", s_flow_g);
+    snprintf(s_flow_lost, sizeof(s_flow_lost), "%d left", s_flow_l);
 }
 
 /* ---- time and history ---- */
@@ -493,9 +525,11 @@ static void refresh(void)
     }
 
     apply_totals(&totals);
-    Serial.printf("fetch ok: MRR %lld cents, %d active, %d trial%s\n",
+    Serial.printf("fetch ok: MRR %lld cents, %d active, %d trial, "
+                  "flow +%d/-%d%s\n",
                   (long long)totals.mrr_cents, totals.active_count,
-                  totals.trial_count, truncated ? " (TRUNCATED)" : "");
+                  totals.trial_count, totals.new_count, totals.churned_count,
+                  truncated ? " (TRUNCATED)" : "");
 }
 
 /* ---- portal callbacks ---- */

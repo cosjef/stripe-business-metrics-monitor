@@ -279,7 +279,9 @@ static struct {
     lv_obj_t *hero;
     lv_obj_t *track;
     lv_obj_t *fill;
+    lv_obj_t *fill2;      /* second span, flow variant only */
     lv_obj_t *caption;
+    lv_obj_t *caption2;   /* right-hand caption, flow variant only */
     lv_obj_t *dots[SCREENS_MAX_DOTS];
     int hero_px;
     int hero_pos_px;
@@ -353,10 +355,24 @@ static void build_card_objects(lv_obj_t *scr)
     lv_obj_set_style_radius(s_card.fill, LV_RADIUS_CIRCLE, 0);
     lv_obj_clear_flag(s_card.fill, LV_OBJ_FLAG_SCROLLABLE);
 
+    s_card.fill2 = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.fill2);
+    lv_obj_set_pos(s_card.fill2, inner_x, CARD_Y + CARD_BAR_DY);
+    lv_obj_set_size(s_card.fill2, 0, CARD_BAR_H);
+    lv_obj_set_style_bg_opa(s_card.fill2, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_card.fill2, LV_RADIUS_CIRCLE, 0);
+    lv_obj_clear_flag(s_card.fill2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
+
     s_card.caption = lv_label_create(scr);
     lv_obj_set_style_text_font(s_card.caption, font_for_size(SIZE_FOOTER), 0);
     lv_obj_set_style_text_color(s_card.caption, lv_color_hex(COLOR_DIM), 0);
     lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
+
+    s_card.caption2 = lv_label_create(scr);
+    lv_obj_set_style_text_font(s_card.caption2, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(s_card.caption2, lv_color_hex(COLOR_DIM), 0);
+    lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
 
     for (int i = 0; i < SCREENS_MAX_DOTS; i++) {
         lv_obj_t *dot = lv_obj_create(scr);
@@ -418,8 +434,78 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
      */
     const int card_w = PANEL_PX - 2 * PAD_PX;
     const int bar_w = card_w - 2 * CARD_PAD;
+    const int inner_x = PAD_PX + CARD_PAD;
 
-    if (data->has_delta) {
+    if (data->has_flow) {
+        /*
+         * Flow: one run flush-left, lost then gained, split by proportion.
+         *
+         * Laid out left to right rather than opposed across a centre line.
+         * Centred bars align with neither the hero nor the subtitle above
+         * them, so the card ends up with two competing left edges; this keeps
+         * one. The reading changes with it -- total movement split by share,
+         * rather than the ratio of two opposing sides -- and the pill already
+         * carries the net, so the ratio is not lost.
+         */
+        const int total = data->flow_gained + data->flow_lost;
+        const int gap = 4;
+
+        if (total > 0) {
+            int lw = (bar_w - gap) * data->flow_lost / total;
+            int gw = (bar_w - gap) - lw;
+
+            /* A month of only joins or only losses still has one real span;
+             * do not leave a zero-width sliver of the other colour. */
+            if (data->flow_lost == 0) {
+                lw = 0;
+                gw = bar_w;
+            } else if (data->flow_gained == 0) {
+                gw = 0;
+                lw = bar_w;
+            }
+
+            /* Churn is amber, not red: a cancellation is ordinary business.
+             * Red is reserved for threshold breaches (spec 4.2). */
+            lv_obj_set_pos(s_card.fill, inner_x, CARD_Y + CARD_BAR_DY);
+            lv_obj_set_size(s_card.fill, lw, CARD_BAR_H);
+            lv_obj_set_style_bg_color(s_card.fill, lv_color_hex(COLOR_AMBER), 0);
+            lv_obj_clear_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+
+            lv_obj_set_pos(s_card.fill2, inner_x + lw + (lw ? gap : 0),
+                           CARD_Y + CARD_BAR_DY);
+            lv_obj_set_size(s_card.fill2, gw, CARD_BAR_H);
+            lv_obj_set_style_bg_color(s_card.fill2, lv_color_hex(COLOR_GREEN), 0);
+            lv_obj_clear_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
+
+            /*
+             * Captions anchored to their own spans, so they stay in register
+             * as the counts change rather than drifting out of a fixed
+             * layout.
+             */
+            lv_label_set_text(s_card.caption,
+                              data->flow_lost_label ? data->flow_lost_label : "");
+            lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
+
+            lv_label_set_text(s_card.caption2,
+                              data->flow_gained_label ? data->flow_gained_label : "");
+            lv_obj_set_pos(s_card.caption2, inner_x + lw + (lw ? gap : 0),
+                           CARD_Y + CARD_CAPTION_DY);
+            lv_obj_clear_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(s_card.caption, "no change this month");
+            lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
+        }
+
+        /* The pill carries the net, coloured by direction. */
+        const uint32_t accent =
+            data->delta_is_gain ? COLOR_GREEN : COLOR_AMBER;
+        lv_label_set_text(s_card.pill, data->delta ? data->delta : "");
+        lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(accent), 0);
+        lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_BG), 0);
+    } else if (data->has_delta) {
         const uint32_t accent = data->delta_is_gain ? COLOR_GREEN : COLOR_RED;
 
         lv_label_set_text(s_card.pill, data->delta);
@@ -433,22 +519,31 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
         } else if (pct > 100) {
             pct = 100;
         }
+        lv_obj_set_pos(s_card.fill, inner_x, CARD_Y + CARD_BAR_DY);
         lv_obj_set_size(s_card.fill, (bar_w * pct) / 100, CARD_BAR_H);
         lv_obj_set_style_bg_color(s_card.fill, lv_color_hex(accent), 0);
         lv_obj_clear_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
     } else {
         /* Muted pill on the track colour, and no fill at all. */
         lv_label_set_text(s_card.pill, "--");
         lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(COLOR_TRACK), 0);
         lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_DIM), 0);
         lv_obj_add_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
     }
 
     /* Right-align the pill after its text changed, or the width is stale. */
     lv_obj_align(s_card.pill, LV_ALIGN_TOP_RIGHT, -PAD_PX,
                  LABEL_BASELINE_Y - PILL_PAD_Y);
 
-    lv_label_set_text(s_card.caption, data->comparison ? data->comparison : "");
+    if (!data->has_flow) {
+        lv_label_set_text(s_card.caption,
+                          data->comparison ? data->comparison : "");
+        lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
+    }
 
     const int total = data->dot_count > SCREENS_MAX_DOTS
                           ? SCREENS_MAX_DOTS : data->dot_count;

@@ -63,6 +63,12 @@ typedef struct {
     int active_count;           /* paying subscriptions */
     int trial_count;            /* trialing subscriptions */
     int tiered_count;           /* items that could not be computed */
+    /*
+     * Subscriber flow over the caller's window. Zero unless a window was set
+     * -- see jsonstream_set_window.
+     */
+    int new_count;              /* created inside the window, still active */
+    int churned_count;          /* ended inside the window */
     bool has_tiered;            /* any tiered item present */
     bool mixed_currency;        /* more than one currency seen */
     char currency[MRR_CURRENCY_LEN];  /* the currency summed */
