@@ -151,3 +151,24 @@ int64_t mrr_arr_cents(int64_t mrr_cents);
  * one-subscription-per-customer accounts the distinction does not arise.
  */
 int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count);
+
+/*
+ * Customers required on EACH side before the mix comparison is shown.
+ *
+ * The comparison is two averages. Below this, one unusual customer moves the
+ * verdict by dollars -- a single $49 signup against three $13 ones would
+ * report the mix improving when nothing meaningful happened. Six is the point
+ * where a single outlier stops deciding the answer on this account's spread
+ * ($13 to $49).
+ */
+#define MRR_MIX_MIN 6
+
+/*
+ * Whether joining and leaving ARPU can honestly be compared.
+ *
+ * False when either side is too small, including zero: a month with no churn
+ * has no "lost" average to compare against, and reporting improvement from an
+ * empty set would be a conclusion the data cannot support. The caller shows
+ * the plain average and says why.
+ */
+_Bool mrr_mix_comparable(int new_count, int churned_count);

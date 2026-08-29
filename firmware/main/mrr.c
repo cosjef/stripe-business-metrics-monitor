@@ -126,6 +126,11 @@ int64_t mrr_arr_cents(int64_t mrr_cents)
     return mrr_cents * 12;
 }
 
+_Bool mrr_mix_comparable(int new_count, int churned_count)
+{
+    return new_count >= MRR_MIX_MIN && churned_count >= MRR_MIX_MIN;
+}
+
 int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count)
 {
     /* An average over zero customers is undefined. Returning 0 is honest;

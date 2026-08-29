@@ -470,6 +470,44 @@ static void test_empty_page_is_harmless(void)
     check_true("not spuriously mixed", !acc.mixed_currency);
 }
 
+/*
+ * Customer-mix quality: are the customers being won worth more than the ones
+ * being lost?
+ *
+ * This is the one question no other screen answers. MRR says revenue grew,
+ * PAID SUBS says the count grew, NET 30D says the money grew -- none of them
+ * say whether the mix is improving. The comparison is two averages, so it is
+ * only meaningful with enough customers on both sides.
+ */
+static void test_mix_quality(void)
+{
+    printf("customer mix quality\n");
+
+    /* 10 joined worth $354, 7 left worth $175. */
+    check_true("enough on both sides to compare",
+               mrr_mix_comparable(10, 7));
+    check_i64("ARPU of those joining", mrr_arpu_cents(35400, 10), 3540);
+    check_i64("ARPU of those leaving", mrr_arpu_cents(17500, 7), 2500);
+
+    /*
+     * The gate. Below the minimum on EITHER side the comparison is two
+     * averages over a handful of customers, where one unusual signup moves
+     * the verdict by dollars. The device shows the plain average instead.
+     */
+    check_true("too few joining is not comparable",
+               !mrr_mix_comparable(MRR_MIX_MIN - 1, 7));
+    check_true("too few leaving is not comparable",
+               !mrr_mix_comparable(10, MRR_MIX_MIN - 1));
+    check_true("exactly the minimum on both sides is comparable",
+               mrr_mix_comparable(MRR_MIX_MIN, MRR_MIX_MIN));
+
+    /* A month with no churn cannot be compared either: there is no "lost"
+     * average to compare against, and claiming improvement would be a
+     * conclusion drawn from an empty set. */
+    check_true("no churn means no comparison", !mrr_mix_comparable(10, 0));
+    check_true("no signups means no comparison", !mrr_mix_comparable(0, 7));
+}
+
 int main(void)
 {
     printf("MRR computation tests (spec 7.2)\n\n");
@@ -493,6 +531,8 @@ int main(void)
     test_mixed_currency_across_pages();
     test_flags_latch();
     test_empty_page_is_harmless();
+
+    test_mix_quality();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

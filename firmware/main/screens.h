@@ -77,6 +77,20 @@ typedef struct {
      */
     _Bool accent_amber;
 
+    /*
+     * Mix variant: two labelled bar rows comparing two rates.
+     *
+     * Unlike the flow bar, which splits one total, these are two independent
+     * quantities scaled against the larger. Each row's label sits directly
+     * beneath its own bar in the bar's colour -- a shared caption row made the
+     * reader work out which bar was which from colour alone.
+     */
+    _Bool has_mix;
+    int mix_top;                 /* the better quantity, drawn green */
+    int mix_bottom;              /* the worse quantity, drawn amber */
+    const char *mix_top_label;   /* "joining  $35.40" */
+    const char *mix_bottom_label;/* "leaving  $25.00" */
+
     int dot_index;
     int dot_count;
 } card_data_t;

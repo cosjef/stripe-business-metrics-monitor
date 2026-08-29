@@ -90,6 +90,28 @@
 #define C6_CARD_BAR_H           (14)
 #define C6_CARD_CAPTION_DY      (248)   /* 14px under the bar */
 
+/*
+ * Mix variant rows (two labelled bars).
+ *
+ * A card sized for one bar cannot also hold two bars, two labels and a
+ * subtitle: the budget is 272px against 260 of interior. The subtitle is what
+ * gives -- "per subscriber" only restates what the ARPU label already means
+ * -- and these offsets lay the rest out with real separation instead of
+ * squeezing a second row in under the first.
+ */
+/*
+ * The hero sits high in the card, because the mix variant hides the subtitle
+ * and inherits its space. At 150 the first bar cleared the hero by 8px, which
+ * read as the bar crowding the number; 128 gives 30px. The room comes from
+ * the top margin, which was 61px of nothing, rather than from the bottom --
+ * pushing the bars down instead would have squeezed the second label against
+ * the card edge.
+ */
+#define C6_MIX_HERO_BASELINE_DY (128)
+#define C6_MIX_ROW1_DY          (178)
+#define C6_MIX_ROW2_DY          (232)
+#define C6_MIX_LABEL_GAP        (8)    /* bar bottom to its label */
+
 /* Delta pill, right-aligned on the label row. */
 #define C6_PILL_PAD_X           (16)
 #define C6_PILL_PAD_Y           (6)

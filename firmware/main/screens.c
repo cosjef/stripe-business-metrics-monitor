@@ -282,9 +282,18 @@ static struct {
     lv_obj_t *fill2;      /* second span, flow variant only */
     lv_obj_t *caption;
     lv_obj_t *caption2;   /* right-hand caption, flow variant only */
+    lv_obj_t *mix_bar2;   /* second bar row, mix variant only */
     lv_obj_t *dots[SCREENS_MAX_DOTS];
     int hero_px;
     int hero_pos_px;
+    /*
+     * The mix variant lifts the hero to make room for a second labelled bar
+     * row, so the cached position depends on the variant as well as the font
+     * size. Without this, moving between the ARPU card and another card whose
+     * value happens to take the same size would leave the hero at the
+     * previous screen's height.
+     */
+    _Bool hero_pos_mix;
 } s_card;
 
 static void build_card_objects(lv_obj_t *scr)
@@ -369,6 +378,14 @@ static void build_card_objects(lv_obj_t *scr)
     lv_obj_set_style_text_color(s_card.caption, lv_color_hex(COLOR_DIM), 0);
     lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
 
+    s_card.mix_bar2 = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.mix_bar2);
+    lv_obj_set_size(s_card.mix_bar2, 0, CARD_BAR_H);
+    lv_obj_set_style_bg_opa(s_card.mix_bar2, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_card.mix_bar2, LV_RADIUS_CIRCLE, 0);
+    lv_obj_clear_flag(s_card.mix_bar2, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_card.mix_bar2, LV_OBJ_FLAG_HIDDEN);
+
     s_card.caption2 = lv_label_create(scr);
     lv_obj_set_style_text_font(s_card.caption2, font_for_size(SIZE_FOOTER), 0);
     lv_obj_set_style_text_color(s_card.caption2, lv_color_hex(COLOR_DIM), 0);
@@ -409,7 +426,18 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     const int inner_x = PAD_PX + CARD_PAD;
 
     lv_label_set_text(s_card.label, data->label);
-    lv_label_set_text(s_card.subtitle, data->subtitle ? data->subtitle : "");
+
+    /*
+     * The mix variant has no subtitle. Two bars, two labels, a hero and a
+     * subtitle need 272px of a 260px interior, and "per subscriber" is the
+     * line that gives -- it only restates what the ARPU label already says.
+     */
+    if (data->has_mix) {
+        lv_obj_add_flag(s_card.subtitle, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text(s_card.subtitle, data->subtitle ? data->subtitle : "");
+        lv_obj_clear_flag(s_card.subtitle, LV_OBJ_FLAG_HIDDEN);
+    }
 
     /*
      * Hero: sized to the CARD's column, not the panel's.
@@ -430,12 +458,16 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
         lv_color_hex(data->accent_amber ? COLOR_AMBER : COLOR_PRIMARY), 0);
     lv_label_set_text(s_card.hero, data->hero);
 
-    if (hero_px != s_card.hero_pos_px) {
+    if (hero_px != s_card.hero_pos_px ||
+        (_Bool)data->has_mix != s_card.hero_pos_mix) {
         lv_obj_set_pos(s_card.hero, inner_x,
-                       baseline_to_top(CARD_Y + CARD_HERO_BASELINE_DY,
+                       baseline_to_top(CARD_Y + (data->has_mix
+                                                 ? MIX_HERO_BASELINE_DY
+                                                 : CARD_HERO_BASELINE_DY),
                                        (int)lv_font_get_line_height(font_for_size(hero_px)),
                                        (int)font_for_size(hero_px)->base_line));
         s_card.hero_pos_px = hero_px;
+        s_card.hero_pos_mix = data->has_mix;
     }
 
     /*
@@ -447,7 +479,55 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
      * coming, without asserting one it has not measured. Spec 1 principle 4:
      * it never lies, and a plausible-looking 0.0% would be a lie.
      */
-    if (data->has_flow) {
+    if (data->has_mix) {
+        /*
+         * Two labelled rows. The bars are scaled against the larger of the
+         * two values, so the longer bar is the better rate and the gap
+         * between them is the comparison -- no legend needed, because each
+         * label sits under its own bar in that bar's colour.
+         */
+        const int peak = data->mix_top > data->mix_bottom
+                             ? data->mix_top : data->mix_bottom;
+        const int row1 = CARD_Y + MIX_ROW1_DY;
+        const int row2 = CARD_Y + MIX_ROW2_DY;
+
+        if (peak > 0) {
+            lv_obj_set_pos(s_card.fill, inner_x, row1);
+            lv_obj_set_size(s_card.fill, bar_w * data->mix_top / peak,
+                            CARD_BAR_H);
+            lv_obj_set_style_bg_color(s_card.fill, lv_color_hex(COLOR_GREEN), 0);
+            lv_obj_clear_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+
+            lv_obj_set_pos(s_card.mix_bar2, inner_x, row2);
+            lv_obj_set_size(s_card.mix_bar2, bar_w * data->mix_bottom / peak,
+                            CARD_BAR_H);
+            lv_obj_set_style_bg_color(s_card.mix_bar2,
+                                      lv_color_hex(COLOR_AMBER), 0);
+            lv_obj_clear_flag(s_card.mix_bar2, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(s_card.mix_bar2, LV_OBJ_FLAG_HIDDEN);
+        }
+
+        /* Each label in its bar's colour, directly beneath it. */
+        lv_label_set_text(s_card.caption,
+                          data->mix_top_label ? data->mix_top_label : "");
+        lv_obj_set_style_text_color(s_card.caption, lv_color_hex(COLOR_GREEN), 0);
+        lv_obj_set_pos(s_card.caption, inner_x,
+                       row1 + CARD_BAR_H + MIX_LABEL_GAP);
+
+        lv_label_set_text(s_card.caption2,
+                          data->mix_bottom_label ? data->mix_bottom_label : "");
+        lv_obj_set_style_text_color(s_card.caption2, lv_color_hex(COLOR_AMBER), 0);
+        lv_obj_set_pos(s_card.caption2, inner_x,
+                       row2 + CARD_BAR_H + MIX_LABEL_GAP);
+        lv_obj_clear_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
+
+        const uint32_t accent = data->delta_is_gain ? COLOR_GREEN : COLOR_AMBER;
+        lv_label_set_text(s_card.pill, data->delta ? data->delta : "");
+        lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(accent), 0);
+        lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_BG), 0);
+    } else if (data->has_flow) {
         /*
          * Flow: one run flush-left, lost then gained, split by proportion.
          *
@@ -550,10 +630,13 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     lv_obj_align(s_card.pill, LV_ALIGN_TOP_RIGHT, -PAD_PX,
                  LABEL_BASELINE_Y - PILL_PAD_Y);
 
-    if (!data->has_flow) {
+    if (!data->has_flow && !data->has_mix) {
         lv_label_set_text(s_card.caption,
                           data->comparison ? data->comparison : "");
+        /* The mix variant recolours this label; put it back. */
+        lv_obj_set_style_text_color(s_card.caption, lv_color_hex(COLOR_DIM), 0);
         lv_obj_set_pos(s_card.caption, inner_x, CARD_Y + CARD_CAPTION_DY);
+        lv_obj_add_flag(s_card.mix_bar2, LV_OBJ_FLAG_HIDDEN);
     }
 
     const int total = data->dot_count > SCREENS_MAX_DOTS

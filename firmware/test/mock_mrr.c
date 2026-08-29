@@ -646,6 +646,252 @@ static void render_arr_card(void)
     harness_dump_ppm("mock_arr_card.ppm");
 }
 
+/*
+ * ARPU as customer-mix quality.
+ *
+ * The average alone is inert. What moves, and what nobody else on the deck
+ * can say, is whether the customers being won are worth more than the ones
+ * being lost -- here $35.40 against $25.00, so the mix is improving from both
+ * ends at once.
+ *
+ * Three labellings, because the numbers alone made the reader do the
+ * comparison themselves. Each states the conclusion at a different volume.
+ */
+static void arpu_card_base(const char *pill_text, const char *caption,
+                           const char *subtitle)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    label_at(scr, "ARPU", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    lv_obj_t *pill = lv_label_create(scr);
+    lv_label_set_text(pill, pill_text);
+    lv_obj_set_style_text_font(pill, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(pill, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_right(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_top(pill, PILL_PAD_Y, 0);
+    lv_obj_set_style_pad_bottom(pill, PILL_PAD_Y, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -PAD_PX, LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    label_at(scr, subtitle, font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
+             inner_x, CARD_Y + CARD_SUBTITLE_DY);
+
+    const int col = card_w - 2 * CARD_PAD;
+    const int px = hero_size_for_width("$33.53", col);
+    label_at_baseline(scr, "$33.53", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
+
+    /*
+     * Two opposed spans scaled against the larger value: joining on the left
+     * in green, leaving on the right in amber. Unlike the flow bar this is a
+     * comparison of two rates, not a split of one total, so the widths are
+     * proportional to the dollar amounts.
+     */
+    const int bar_y = CARD_Y + CARD_BAR_DY;
+    const int joining = 3540, leaving = 2500;
+    const int peak = joining > leaving ? joining : leaving;
+    const int gw = col * joining / peak;
+    const int lw = col * leaving / peak;
+
+    lv_obj_t *g = lv_obj_create(scr);
+    lv_obj_remove_style_all(g);
+    lv_obj_set_pos(g, inner_x, bar_y);
+    lv_obj_set_size(g, gw, CARD_BAR_H);
+    lv_obj_set_style_bg_color(g, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(g, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(g, LV_RADIUS_CIRCLE, 0);
+
+    lv_obj_t *l = lv_obj_create(scr);
+    lv_obj_remove_style_all(l);
+    lv_obj_set_pos(l, inner_x, bar_y + CARD_BAR_H + 6);
+    lv_obj_set_size(l, lw, CARD_BAR_H);
+    lv_obj_set_style_bg_color(l, lv_color_hex(COLOR_AMBER), 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(l, LV_RADIUS_CIRCLE, 0);
+
+    label_at(scr, caption, font_for_size(SIZE_FOOTER), COLOR_DIM,
+             inner_x, CARD_Y + CARD_CAPTION_DY + 20);
+
+    dots(scr, 5, 7);
+    harness_render();
+}
+
+/* 1: name the two groups in plain words. */
+static void render_arpu_a(void)
+{
+    arpu_card_base("mix improving", "joining $35.40   leaving $25.00",
+                   "per subscriber");
+    harness_dump_ppm("mock_arpu_a.ppm");
+}
+
+/* 2: state the conclusion as the subtitle, numbers as evidence. */
+static void render_arpu_b(void)
+{
+    arpu_card_base("+$10.40", "new customers worth more than lost ones",
+                   "winning better customers");
+    harness_dump_ppm("mock_arpu_b.ppm");
+}
+
+/* 3: lead with the gap itself. */
+static void render_arpu_c(void)
+{
+    arpu_card_base("41% better", "each new customer beats each lost one",
+                   "per subscriber");
+    harness_dump_ppm("mock_arpu_c.ppm");
+}
+
+/*
+ * ARPU mix, with each label under the bar it describes.
+ *
+ * The first version stacked two bars and put both labels in one row beneath
+ * them, so nothing said which bar was which -- the reader had to infer it
+ * from colour. Each bar now carries its own label directly underneath, in the
+ * bar's own colour, so the pairing needs no decoding.
+ */
+static void render_arpu_paired(void)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+    const int col = card_w - 2 * CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    label_at(scr, "ARPU", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    lv_obj_t *pill = lv_label_create(scr);
+    lv_label_set_text(pill, "+$10.40");
+    lv_obj_set_style_text_font(pill, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(pill, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_right(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_top(pill, PILL_PAD_Y, 0);
+    lv_obj_set_style_pad_bottom(pill, PILL_PAD_Y, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -PAD_PX, LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    /*
+     * No subtitle here, deliberately.
+     *
+     * "winning better customers" said the same thing the two labelled bars
+     * already show and the pill already states -- the conclusion three times
+     * -- and at 31px it crowded the hero it sat above. The bars carry the
+     * comparison; the pill carries the verdict.
+     */
+    /* No subtitle: the budget does not allow one, and "per subscriber" only
+     * restates the ARPU label. See layout_c6.h. */
+    const int px = hero_size_for_width("$33.53", col);
+    label_at_baseline(scr, "$33.53", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + MIX_HERO_BASELINE_DY);
+
+    /*
+     * Two rows, each a bar with its own caption beneath it. Widths are
+     * proportional to the dollar amounts and scaled against the larger, so
+     * the green bar being visibly longer is the answer to "are the customers
+     * I win worth more than the ones I lose".
+     */
+    const int joining = 3540, leaving = 2500;
+    const int peak = joining > leaving ? joining : leaving;
+    const int bar_h = CARD_BAR_H;
+    const int row1 = CARD_Y + MIX_ROW1_DY;
+    const int row2 = CARD_Y + MIX_ROW2_DY;
+
+    lv_obj_t *g = lv_obj_create(scr);
+    lv_obj_remove_style_all(g);
+    lv_obj_set_pos(g, inner_x, row1);
+    lv_obj_set_size(g, col * joining / peak, bar_h);
+    lv_obj_set_style_bg_color(g, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(g, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(g, LV_RADIUS_CIRCLE, 0);
+
+    /* Label in the bar's own colour: the pairing then needs no legend. */
+    label_at(scr, "joining  $35.40", font_for_size(SIZE_FOOTER),
+             COLOR_GREEN, inner_x, row1 + bar_h + MIX_LABEL_GAP);
+
+    lv_obj_t *l = lv_obj_create(scr);
+    lv_obj_remove_style_all(l);
+    lv_obj_set_pos(l, inner_x, row2);
+    lv_obj_set_size(l, col * leaving / peak, bar_h);
+    lv_obj_set_style_bg_color(l, lv_color_hex(COLOR_AMBER), 0);
+    lv_obj_set_style_bg_opa(l, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(l, LV_RADIUS_CIRCLE, 0);
+
+    label_at(scr, "leaving  $25.00", font_for_size(SIZE_FOOTER),
+             COLOR_AMBER, inner_x, row2 + bar_h + MIX_LABEL_GAP);
+
+    dots(scr, 5, 7);
+    harness_render();
+    harness_dump_ppm("mock_arpu_paired.ppm");
+}
+
+/* The honesty gate: too few on either side to compare. */
+static void render_arpu_gated(void)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+    const int col = card_w - 2 * CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    label_at(scr, "ARPU", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    label_at(scr, "per subscriber", font_for_size(SIZE_SUBTITLE),
+             COLOR_MUTED, inner_x, CARD_Y + CARD_SUBTITLE_DY);
+
+    const int px = hero_size_for_width("$33.53", col);
+    label_at_baseline(scr, "$33.53", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
+
+    label_at(scr, "too few to compare (3 joined, 2 left)",
+             font_for_size(SIZE_FOOTER), COLOR_DIM,
+             inner_x, CARD_Y + CARD_CAPTION_DY);
+
+    dots(scr, 5, 7);
+    harness_render();
+    harness_dump_ppm("mock_arpu_gated.ppm");
+}
+
 int main(void)
 {
     harness_init();
@@ -659,6 +905,11 @@ int main(void)
     render_mrr_with_arr();
     render_arr_screen();
     render_arr_card();
+    render_arpu_a();
+    render_arpu_b();
+    render_arpu_c();
+    render_arpu_paired();
+    render_arpu_gated();
     printf("wrote mock_current/option_b/collecting .ppm at %dx%d\n",
            HARNESS_W, HARNESS_H);
     return 0;

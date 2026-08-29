@@ -53,6 +53,10 @@
 #define CARD_BAR_DY         C6_CARD_BAR_DY
 #define CARD_BAR_H          C6_CARD_BAR_H
 #define CARD_CAPTION_DY     C6_CARD_CAPTION_DY
+#define MIX_HERO_BASELINE_DY C6_MIX_HERO_BASELINE_DY
+#define MIX_ROW1_DY         C6_MIX_ROW1_DY
+#define MIX_ROW2_DY         C6_MIX_ROW2_DY
+#define MIX_LABEL_GAP       C6_MIX_LABEL_GAP
 #define PILL_PAD_X          C6_PILL_PAD_X
 #define PILL_PAD_Y          C6_PILL_PAD_Y
 
@@ -100,6 +104,13 @@
 #define CARD_BAR_DY         (110)
 #define CARD_BAR_H          (7)
 #define CARD_CAPTION_DY     (124)
+/* Mix variant, S3 values -- half the C6 offsets, same proportions. The card
+ * is a 480x480 design, but these must exist for both targets because
+ * screens.c compiles once for both and the host suite builds this branch. */
+#define MIX_HERO_BASELINE_DY (64)
+#define MIX_ROW1_DY         (89)
+#define MIX_ROW2_DY         (116)
+#define MIX_LABEL_GAP       (4)
 #define PILL_PAD_X          (8)
 #define PILL_PAD_Y          (3)
 

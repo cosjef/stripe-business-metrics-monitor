@@ -38,6 +38,7 @@
 extern "C" {
 #include "format.h"
 #include "history.h"
+#include "mrr.h"
 #include "provision.h"
 #include "rotation.h"
 #include "screens.h"
@@ -216,6 +217,12 @@ static char s_net_hero[24], s_net_sub[FIELD_LEN], s_net_caption[FIELD_LEN];
 static char s_net_pill[16];
 static bool s_net_is_gain;
 static int s_net_fill_pct;
+
+/* ARPU mix: are the customers we win worth more than the ones we lose? */
+static char s_arpu_pill[16], s_arpu_top[32], s_arpu_bottom[32];
+static char s_arpu_caption[FIELD_LEN];
+static bool s_arpu_has_mix, s_arpu_is_gain;
+static int s_arpu_top_v, s_arpu_bottom_v;
 static bool s_risk_actionable;   /* true when someone has given notice */
 static int s_risk_fill_pct;
 
@@ -302,6 +309,28 @@ static void show(int slot)
      * history to show -- a card with a permanently empty bar would be worse
      * than no card.
      */
+    if (id == SCREEN_ARPU) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_values[id].hero;
+        c.subtitle = s_values[id].subtitle;
+        c.has_mix = s_arpu_has_mix;
+        if (s_arpu_has_mix) {
+            c.delta = s_arpu_pill;
+            c.delta_is_gain = s_arpu_is_gain;
+            c.mix_top = s_arpu_top_v;
+            c.mix_bottom = s_arpu_bottom_v;
+            c.mix_top_label = s_arpu_top;
+            c.mix_bottom_label = s_arpu_bottom;
+        } else {
+            c.comparison = s_arpu_caption;
+        }
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
     if (id == SCREEN_NET_CHANGE) {
         card_data_t c = {};
         c.label = s_labels[id];
@@ -555,6 +584,39 @@ static void apply_totals(const mrr_totals_t *t)
                  s_net_is_gain ? "growth" : "shrink");
     }
 
+    /*
+     * ARPU mix.
+     *
+     * The average alone is inert. What moves -- and what no other screen can
+     * say -- is whether the customers being won are worth more than the ones
+     * being lost. Gated: below MRR_MIX_MIN on either side the comparison is
+     * two averages over a handful of customers, where one unusual signup
+     * decides the verdict.
+     */
+    s_arpu_has_mix = mrr_mix_comparable(t->new_count, t->churned_count);
+
+    if (s_arpu_has_mix) {
+        const int64_t joining = mrr_arpu_cents(t->new_cents, t->new_count);
+        const int64_t leaving = mrr_arpu_cents(t->churned_cents,
+                                               t->churned_count);
+        s_arpu_top_v = (int)joining;
+        s_arpu_bottom_v = (int)leaving;
+        s_arpu_is_gain = (joining >= leaving);
+
+        char a[16], b[16], gap[16];
+        format_money_compact(joining, a, sizeof(a));
+        format_money_compact(leaving, b, sizeof(b));
+        format_money_delta(joining - leaving, gap, sizeof(gap));
+        snprintf(s_arpu_top, sizeof(s_arpu_top), "joining  %s", a);
+        snprintf(s_arpu_bottom, sizeof(s_arpu_bottom), "leaving  %s", b);
+        snprintf(s_arpu_pill, sizeof(s_arpu_pill), "%s", gap);
+    } else {
+        /* Say why, rather than silently dropping to a bare average. */
+        snprintf(s_arpu_caption, sizeof(s_arpu_caption),
+                 "too few to compare (%d joined, %d left)",
+                 t->new_count, t->churned_count);
+    }
+
     /* Subscriber flow, for the PAID SUBS card. */
     s_flow_g = t->new_count;
     s_flow_l = t->churned_count;
@@ -764,6 +826,10 @@ static void refresh(void)
     Serial.printf("flow money: +%lld / -%lld cents, net %+lld\n",
                   (long long)totals.new_cents, (long long)totals.churned_cents,
                   (long long)(totals.new_cents - totals.churned_cents));
+    Serial.printf("arpu mix: comparable=%d joining=%lld leaving=%lld\n",
+                  (int)mrr_mix_comparable(totals.new_count, totals.churned_count),
+                  (long long)mrr_arpu_cents(totals.new_cents, totals.new_count),
+                  (long long)mrr_arpu_cents(totals.churned_cents, totals.churned_count));
     Serial.printf("at risk: %d sub(s), %lld cents/mo, soonest %lld\n",
                   totals.at_risk_count, (long long)totals.at_risk_cents,
                   (long long)totals.at_risk_soonest);
