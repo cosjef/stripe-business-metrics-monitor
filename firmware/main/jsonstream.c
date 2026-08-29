@@ -122,8 +122,17 @@ static void finish_subscription(jsonstream_t *js)
      * rather than counting every subscription ever created as new.
      */
     if (js->window_start > 0) {
+        /*
+         * The subscription's monthly value. cur_subtotal is folded by
+         * finish_item as each price completes, so it is already correct here
+         * for cancelled subscriptions too -- their items are parsed the same
+         * way, they simply never reach mrr_cents.
+         */
+        const int64_t worth = js->cur_subtotal;
+
         if (js->cur_ended >= js->window_start) {
             js->totals.churned_count++;
+            js->totals.churned_cents += worth;
         } else if (js->cur_created >= js->window_start &&
                    js->cur_ended == 0) {
             /*
@@ -133,6 +142,7 @@ static void finish_subscription(jsonstream_t *js)
              * the owner can see for themselves.
              */
             js->totals.new_count++;
+            js->totals.new_cents += worth;
         }
     }
 

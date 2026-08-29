@@ -202,6 +202,20 @@ static char s_risk_hero[24];
 static char s_risk_sub[FIELD_LEN];
 static char s_risk_caption[FIELD_LEN];
 static char s_risk_pill[16];
+
+/* ARR card: the annual figure's own delta strings. */
+static char s_arr_delta[16];
+static char s_arr_caption[FIELD_LEN];
+static bool s_arr_has_delta;
+static bool s_arr_is_gain;
+static int s_arr_fill_pct;
+
+/* NEW PAID and NET 30D: revenue flow, not just head count. */
+static char s_new_hero[24], s_new_sub[FIELD_LEN], s_new_caption[FIELD_LEN];
+static char s_net_hero[24], s_net_sub[FIELD_LEN], s_net_caption[FIELD_LEN];
+static char s_net_pill[16];
+static bool s_net_is_gain;
+static int s_net_fill_pct;
 static bool s_risk_actionable;   /* true when someone has given notice */
 static int s_risk_fill_pct;
 
@@ -288,6 +302,50 @@ static void show(int slot)
      * history to show -- a card with a permanently empty bar would be worse
      * than no card.
      */
+    if (id == SCREEN_NET_CHANGE) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_net_hero;
+        c.subtitle = s_net_sub;
+        c.comparison = s_net_caption;
+        c.has_delta = true;
+        c.delta = s_net_pill;
+        c.delta_is_gain = s_net_is_gain;
+        c.fill_pct = s_net_fill_pct;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
+    if (id == SCREEN_NEW_PAID) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_new_hero;
+        c.subtitle = s_new_sub;
+        c.comparison = s_new_caption;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
+    if (id == SCREEN_ARR) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_values[id].hero;
+        c.subtitle = s_values[id].subtitle;
+        c.has_delta = s_arr_has_delta;
+        c.delta = s_arr_delta;
+        c.comparison = s_arr_caption;
+        c.delta_is_gain = s_arr_is_gain;
+        c.fill_pct = s_arr_fill_pct;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
     if (id == SCREEN_CANCELLATIONS) {
         card_data_t c = {};
         c.label = s_labels[id];
@@ -408,6 +466,70 @@ static void apply_totals(const mrr_totals_t *t)
 
     record_history(t->mrr_cents);
     update_delta(t->mrr_cents);
+
+    /*
+     * ARR's delta.
+     *
+     * The percentage is identical to MRR's -- ARR is mrr_cents * 12 and the
+     * twelve cancels -- so the pill deliberately carries the annual MONEY
+     * amount instead. "+$536/yr" is the one thing this screen can say that
+     * the MRR card does not already say in the same units.
+     */
+    s_arr_has_delta = s_has_delta;
+    s_arr_is_gain = s_delta_is_gain;
+    s_arr_fill_pct = s_fill_pct;
+    if (s_arr_has_delta) {
+        const int64_t change_yr = history_change(&s_history) * 12;
+        char amt[24];
+        format_money_delta(change_yr, amt, sizeof(amt));
+        snprintf(s_arr_delta, sizeof(s_arr_delta), "%s", s_delta);
+        snprintf(s_arr_caption, sizeof(s_arr_caption), "%s vs last month", amt);
+    } else {
+        snprintf(s_arr_caption, sizeof(s_arr_caption), "%s", s_comparison);
+    }
+
+    /*
+     * NEW PAID: the month's signups, valued.
+     *
+     * The count is the hero because that is the figure people track, but the
+     * revenue it carries is the subtitle -- ten signups at $13 and ten at $49
+     * are the same number and very different months.
+     */
+    format_count(t->new_count, s_new_hero, sizeof(s_new_hero));
+    {
+        char amt[24];
+        format_money_compact(t->new_cents, amt, sizeof(amt));
+        snprintf(s_new_sub, sizeof(s_new_sub), "%s/mo added", amt);
+        snprintf(s_new_caption, sizeof(s_new_caption), "last 30 days");
+    }
+
+    /*
+     * NET 30D: what the month actually did to revenue.
+     *
+     * This is the one screen that answers "did we grow?" in money rather than
+     * heads. PAID SUBS shows +10/-7; this shows that those ten were worth
+     * more than the seven, which is the fact that decides whether the month
+     * was good.
+     */
+    {
+        const int64_t net = t->new_cents - t->churned_cents;
+        s_net_is_gain = (net >= 0);
+        format_money_delta(net, s_net_hero, sizeof(s_net_hero));
+        snprintf(s_net_sub, sizeof(s_net_sub), "net this month");
+
+        char gained[24], lost[24];
+        format_money_compact(t->new_cents, gained, sizeof(gained));
+        format_money_compact(t->churned_cents, lost, sizeof(lost));
+        snprintf(s_net_caption, sizeof(s_net_caption), "+%s / -%s",
+                 gained, lost);
+
+        /* The bar shows what share of the month's gross movement was gain.
+         * Above half is growth; the pill names the direction. */
+        const int64_t gross = t->new_cents + t->churned_cents;
+        s_net_fill_pct = gross > 0 ? (int)((t->new_cents * 100) / gross) : 0;
+        snprintf(s_net_pill, sizeof(s_net_pill), "%s",
+                 s_net_is_gain ? "growth" : "shrink");
+    }
 
     /* Subscriber flow, for the PAID SUBS card. */
     s_flow_g = t->new_count;
@@ -615,6 +737,9 @@ static void refresh(void)
                   (long long)totals.mrr_cents, totals.active_count,
                   totals.trial_count, totals.new_count, totals.churned_count,
                   truncated ? " (TRUNCATED)" : "");
+    Serial.printf("flow money: +%lld / -%lld cents, net %+lld\n",
+                  (long long)totals.new_cents, (long long)totals.churned_cents,
+                  (long long)(totals.new_cents - totals.churned_cents));
     Serial.printf("at risk: %d sub(s), %lld cents/mo, soonest %lld\n",
                   totals.at_risk_count, (long long)totals.at_risk_cents,
                   (long long)totals.at_risk_soonest);

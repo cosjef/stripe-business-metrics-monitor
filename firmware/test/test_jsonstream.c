@@ -455,6 +455,55 @@ static void test_no_one_at_risk(void)
     check_i64("no departure date", t->at_risk_soonest, 0);
 }
 
+/*
+ * Revenue gained and lost in the window, not just the head count.
+ *
+ * "+10 / -7" and "+$354 / -$175" are different facts: ten $13 signups do not
+ * replace seven $49 cancellations, and a deck that only counts heads cannot
+ * tell the difference. NET 30D needs the money.
+ */
+static void test_flow_revenue(void)
+{
+    printf("revenue gained and lost in the window\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_set_window(&js, WINDOW_START);
+    jsonstream_feed(&js, FLOW_PAGE, strlen(FLOW_PAGE));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+
+    /* sub_new joined inside the window at $10/mo. */
+    check_i64("revenue gained", t->new_cents, 1000);
+
+    /* sub_gone left inside the window; it was worth $30/mo. Its value is
+     * counted as lost even though it never reached mrr_cents -- the point of
+     * the figure is what the window cost, not what is running now. */
+    check_i64("revenue lost", t->churned_cents, 3000);
+
+    /* sub_ancient ended long before the window and must not appear. */
+    check_true("out-of-window departures are excluded",
+               t->churned_cents == 3000);
+}
+
+static void test_flow_revenue_byte_at_a_time(void)
+{
+    printf("flow revenue survives byte-at-a-time feeding\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_set_window(&js, WINDOW_START);
+    for (const char *p = FLOW_PAGE; *p; p++) {
+        jsonstream_feed(&js, p, 1);
+    }
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+    check_i64("same gained", t->new_cents, 1000);
+    check_i64("same lost", t->churned_cents, 3000);
+}
+
 int main(void)
 {
     test_single_chunk();
@@ -468,6 +517,8 @@ int main(void)
     test_flow_counts();
     test_flow_byte_at_a_time();
     test_flow_without_window();
+    test_flow_revenue();
+    test_flow_revenue_byte_at_a_time();
     test_at_risk();
     test_at_risk_byte_at_a_time();
     test_no_one_at_risk();

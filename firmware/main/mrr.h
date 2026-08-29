@@ -71,6 +71,17 @@ typedef struct {
     int churned_count;          /* ended inside the window */
 
     /*
+     * The monthly revenue those subscriptions carried.
+     *
+     * Counts alone cannot tell whether a month went well: ten signups at $13
+     * do not replace seven cancellations at $49. churned_cents is what left,
+     * even though that money is no longer in mrr_cents -- the figure measures
+     * what the window cost, not what is running now.
+     */
+    int64_t new_cents;
+    int64_t churned_cents;
+
+    /*
      * Subscriptions that have given notice but have not left.
      *
      * These are still active and still counted in mrr_cents -- the money is
