@@ -78,6 +78,14 @@ typedef struct {
     _Bool accent_amber;
 
     /*
+     * Red accent, for the one screen that earns it (spec 4.2): a threshold
+     * breach that is actionable. Kept distinct from accent_amber so the
+     * difference between "degraded" and "act now" stays a decision the
+     * caller makes, not a shade someone picks.
+     */
+    _Bool accent_red;
+
+    /*
      * Mix variant: two labelled bar rows comparing two rates.
      *
      * Unlike the flow bar, which splits one total, these are two independent

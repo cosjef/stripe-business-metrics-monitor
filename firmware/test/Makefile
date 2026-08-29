@@ -33,7 +33,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../main -I ../main/fonts \
 DEPS := ../main/hero_size.h ../main/layout.h ../main/baseline.h
 
 CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_axp2101 test_jsonstream test_wifi_retry
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_axp2101 test_jsonstream test_wifi_retry test_invoices
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
@@ -71,6 +71,9 @@ mock_mrr: mock_mrr.c harness.c ../main/hero_size.c ../main/baseline.c \
 	$(CC) $(LV_CFLAGS) -DHARNESS_W=480 -DHARNESS_H=480 -DBOARD_C6_AMOLED_216 \
 	  -o $@ mock_mrr.c harness.c ../main/screens.c ../main/hero_size.c \
 	  ../main/baseline.c $(FONT_SRCS) $(LV_SRCS)
+
+test_invoices: test_invoices.c ../main/invoices.c ../main/invoices.h
+	$(CC) $(CFLAGS) -o $@ test_invoices.c ../main/invoices.c
 
 quick: $(LOGIC_BINS)
 	@fail=0; for t in $(LOGIC_BINS); do ./$$t || fail=1; echo; done; exit $$fail

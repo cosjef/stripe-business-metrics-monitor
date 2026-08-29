@@ -37,6 +37,7 @@
 
 extern "C" {
 #include "format.h"
+#include "invoices.h"
 #include "history.h"
 #include "mrr.h"
 #include "provision.h"
@@ -216,6 +217,11 @@ static char s_new_hero[24], s_new_sub[FIELD_LEN], s_new_caption[FIELD_LEN];
 static char s_new_pill[16], s_new_top[32], s_new_bottom[32];
 static bool s_new_has_pace, s_new_is_gain;
 static int s_new_this, s_new_prev;
+
+/* FAILED: money that did not arrive and can still be chased. */
+static char s_failed_hero[24], s_failed_sub[FIELD_LEN];
+static char s_failed_caption[FIELD_LEN];
+static int s_failed_count;
 static char s_net_hero[24], s_net_sub[FIELD_LEN], s_net_caption[FIELD_LEN];
 static char s_net_pill[16];
 static bool s_net_is_gain;
@@ -312,6 +318,24 @@ static void show(int slot)
      * history to show -- a card with a permanently empty bar would be worse
      * than no card.
      */
+    if (id == SCREEN_FAILED) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_failed_hero;
+        c.subtitle = s_failed_sub;
+        c.comparison = s_failed_caption;
+        /*
+         * The one screen that earns red (spec 4.2): money actively being
+         * lost, and recoverable if acted on. Everything else on the deck
+         * reports; this one asks.
+         */
+        c.accent_red = true;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
     if (id == SCREEN_ARPU) {
         card_data_t c = {};
         c.label = s_labels[id];
@@ -732,6 +756,60 @@ static void apply_totals(const mrr_totals_t *t)
     }
 
     s_rot_state.churned_30d = t->churned_count;
+
+    /*
+     * Failed payments, from a second call.
+     *
+     * Its own fetch because invoices are a different endpoint. A key without
+     * invoice access, or an account with nothing failing, both leave the
+     * screen hidden -- have_invoices stays false and the rotation rule does
+     * the rest.
+     */
+    {
+        stripe_failed_t f;
+        if (stripe_fetch_failed(&f) == STRIPE_FETCH_OK) {
+            s_rot_state.have_invoices = true;
+            s_rot_state.failed_count = f.count;
+            s_failed_count = f.count;
+            Serial.printf("failed: %d payment(s), %lld cents, retry %lld\n",
+                          f.count, (long long)f.cents,
+                          (long long)f.next_retry);
+
+            if (f.count > 0) {
+                format_money_compact(f.cents, s_failed_hero,
+                                     sizeof(s_failed_hero));
+                snprintf(s_failed_sub, sizeof(s_failed_sub),
+                         "%d payment%s", f.count, f.count == 1 ? "" : "s");
+
+                /*
+                 * The retry date is what makes this actionable. Stripe having
+                 * stopped retrying is the more urgent case, not the calmer
+                 * one: nothing further will happen without intervention.
+                 */
+                const time_t now = time(NULL);
+                if (f.next_retry > 0 && now > CLOCK_SANE_EPOCH) {
+                    const long days =
+                        (long)((f.next_retry - (int64_t)now) / 86400);
+                    if (days > 1) {
+                        snprintf(s_failed_caption, sizeof(s_failed_caption),
+                                 "retrying in %ld days", days);
+                    } else {
+                        snprintf(s_failed_caption, sizeof(s_failed_caption),
+                                 "retrying today");
+                    }
+                } else {
+                    snprintf(s_failed_caption, sizeof(s_failed_caption),
+                             "no retry scheduled");
+                }
+            }
+        } else {
+            /* No invoice access, or the call failed: say nothing rather than
+             * implying the account is clean. */
+            s_rot_state.have_invoices = false;
+            s_failed_count = 0;
+        }
+        rebuild_rotation();
+    }
 }
 
 /* ---- time and history ---- */

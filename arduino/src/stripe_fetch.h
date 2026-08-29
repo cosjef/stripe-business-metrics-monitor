@@ -41,5 +41,20 @@ void stripe_fetch_set_key(const char *key);
  */
 stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated);
 
+/*
+ * Failed payments: money that did not arrive and can still be chased.
+ *
+ * A separate call because invoices are a different endpoint and a different
+ * document shape. Returns STRIPE_FETCH_OK with zeroes when nothing is
+ * failing, which is the normal state.
+ */
+typedef struct {
+    int count;
+    int64_t cents;
+    int64_t next_retry;   /* Unix seconds, 0 if Stripe has stopped retrying */
+} stripe_failed_t;
+
+stripe_fetch_result_t stripe_fetch_failed(stripe_failed_t *out);
+
 /* Human-readable name for a result, for logging. */
 const char *stripe_fetch_strerror(stripe_fetch_result_t r);

@@ -18,6 +18,7 @@
 #include "stripe_ca.h"
 
 extern "C" {
+#include "invoices.h"
 #include "jsonstream.h"
 }
 
@@ -174,6 +175,92 @@ static int fetch_page(NetworkClientSecure &client, jsonstream_t *js,
 
     client.stop();
     return status;
+}
+
+/*
+ * Fetch open invoices and total the recoverable failures.
+ *
+ * status=open filters server-side, so void and paid invoices never cross the
+ * wire -- the scanner still checks, because a filter that silently changes
+ * would otherwise inflate the figure with money that cannot be collected.
+ */
+stripe_fetch_result_t stripe_fetch_failed(stripe_failed_t *out)
+{
+    if (out == NULL) {
+        return STRIPE_FETCH_BAD_RESPONSE;
+    }
+    memset(out, 0, sizeof(*out));
+
+    if (s_key[0] == '\0') {
+        return STRIPE_FETCH_NO_KEY;
+    }
+    if (WiFi.status() != WL_CONNECTED) {
+        return STRIPE_FETCH_NO_NETWORK;
+    }
+
+    invoices_t *iv = (invoices_t *)malloc(sizeof(invoices_t));
+    if (iv == NULL) {
+        return STRIPE_FETCH_BAD_RESPONSE;
+    }
+    invoices_init(iv);
+
+    NetworkClientSecure client;
+    client.setCACert(STRIPE_ROOT_CA);
+    client.setHandshakeTimeout(8);
+
+    stripe_fetch_result_t result = STRIPE_FETCH_OK;
+
+    if (!client.connect(STRIPE_HOST, STRIPE_PORT)) {
+        free(iv);
+        return STRIPE_FETCH_TLS_FAILED;
+    }
+
+    client.printf("GET /v1/invoices?status=open&limit=100 HTTP/1.1\r\n");
+    client.printf("Host: %s\r\n", STRIPE_HOST);
+    client.printf("Authorization: Bearer %s\r\n", s_key);
+    client.print("User-Agent: stripe-revenue-display/0.4 (esp32-c6)\r\n");
+    client.print("Connection: close\r\n");
+    client.print("Accept: application/json\r\n\r\n");
+
+    const int status = read_status_and_headers(client);
+    if (status == 401 || status == 403) {
+        /*
+         * The key cannot read invoices. Not an error worth showing: the
+         * screen simply stays hidden, the same as an account with nothing
+         * failing.
+         */
+        result = STRIPE_FETCH_UNAUTHORIZED;
+    } else if (status != 200) {
+        result = STRIPE_FETCH_HTTP_ERROR;
+    } else {
+        char buf[READ_CHUNK];
+        uint32_t last_data = millis();
+        while (client.connected() || client.available()) {
+            const int n = client.available();
+            if (n > 0) {
+                const int got = client.read((uint8_t *)buf,
+                                            n < READ_CHUNK ? n : READ_CHUNK);
+                if (got > 0) {
+                    invoices_feed(iv, buf, (size_t)got);
+                    last_data = millis();
+                }
+            } else {
+                if (millis() - last_data > READ_TIMEOUT_MS) {
+                    break;
+                }
+                delay(1);
+            }
+        }
+        invoices_finish(iv);
+
+        out->count = iv->failed_count;
+        out->cents = iv->failed_cents;
+        out->next_retry = iv->next_retry;
+    }
+
+    client.stop();
+    free(iv);
+    return result;
 }
 
 stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)

@@ -68,3 +68,9 @@ firmware/test/test_font_coverage
 subs-align.png
 subs-flow.png
 subs-mock.png
+firmware/test/test_invoices
+arpu-*.png
+cards-*.png
+subs-*.png
+arr-*.png
+mrr-*.png

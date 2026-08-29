@@ -459,7 +459,8 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     }
     lv_obj_set_style_text_color(
         s_card.hero,
-        lv_color_hex(data->accent_amber ? COLOR_AMBER : COLOR_PRIMARY), 0);
+        lv_color_hex(data->accent_red ? COLOR_RED
+                     : data->accent_amber ? COLOR_AMBER : COLOR_PRIMARY), 0);
     lv_label_set_text(s_card.hero, data->hero);
 
     if (hero_px != s_card.hero_pos_px ||
