@@ -15,6 +15,8 @@
 #include <WiFi.h>
 #include <esp_heap_caps.h>
 
+#include "stripe_ca.h"
+
 extern "C" {
 #include "jsonstream.h"
 }
@@ -201,13 +203,17 @@ stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
 
     NetworkClientSecure client;
     /*
-     * TODO(stage 4b): pin Stripe's CA bundle. setInsecure() skips certificate
-     * verification, which is acceptable only while this is bench work on a
-     * trusted network -- it must not ship, because an unverified TLS session
-     * is exactly how a revenue figure gets silently replaced by someone
-     * else's. Tracked before any release build.
+     * Verify the server against Stripe's root CA. See stripe_ca.h for which
+     * certificate this is and why it is the self-signed root rather than the
+     * cross-signed copy the server actually sends.
+     *
+     * A failure here is a refusal, not a fallback: if the certificate does
+     * not check out the fetch fails and the deck keeps showing its last good
+     * values. Never retry such a failure with setInsecure() -- that would
+     * turn the one defence against a substituted revenue figure into a
+     * speed bump.
      */
-    client.setInsecure();
+    client.setCACert(STRIPE_ROOT_CA);
     /* setHandshakeTimeout, not setTimeout: the latter is Stream's read
      * timeout and does not govern the TLS handshake at all. Both are in
      * seconds. */
