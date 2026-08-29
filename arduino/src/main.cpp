@@ -408,6 +408,25 @@ static void show(int slot)
     screen_draw_rotation(lv_screen_active(), &d);
 }
 
+/*
+ * The rotation index, owned here rather than inside loop().
+ *
+ * A fetch can shrink the visible list -- the last trial converts, and the
+ * TRIALS screen disappears -- which would leave a stale index pointing past
+ * the end until the next wrap. Keeping it beside the list means the two are
+ * corrected together.
+ */
+static int s_slot;
+
+static void clamp_slot(void)
+{
+    if (s_visible_count <= 0) {
+        s_slot = 0;
+    } else if (s_slot >= s_visible_count) {
+        s_slot = 0;
+    }
+}
+
 static void rebuild_rotation(void)
 {
     const int n = rotation_build(&s_rot_state, s_visible);
@@ -416,10 +435,13 @@ static void rebuild_rotation(void)
          * empty deck -- a blank rotation reads as broken. */
         s_visible[0] = SCREEN_MRR;
         s_visible_count = 1;
+        clamp_slot();
         return;
     }
     s_visible_count = n;
+    clamp_slot();
 }
+
 
 static void apply_totals(const mrr_totals_t *t)
 {
@@ -520,7 +542,9 @@ static void apply_totals(const mrr_totals_t *t)
         char gained[24], lost[24];
         format_money_compact(t->new_cents, gained, sizeof(gained));
         format_money_compact(t->churned_cents, lost, sizeof(lost));
-        snprintf(s_net_caption, sizeof(s_net_caption), "+%s / -%s",
+        /* Label the two figures rather than relying on the reader to know
+         * that green is gain and the leading sign carries the meaning. */
+        snprintf(s_net_caption, sizeof(s_net_caption), "%s new / %s lost",
                  gained, lost);
 
         /* The bar shows what share of the month's gross movement was gain.
@@ -1014,7 +1038,6 @@ void loop(void)
 {
     static uint32_t last_tick;
     static uint32_t last_rotate;
-    static int index;
 
     const uint32_t now = millis();
 
@@ -1032,8 +1055,22 @@ void loop(void)
 
     if (now - last_rotate >= ROTATE_MS) {
         last_rotate = now;
-        index = (index + 1) % SCREEN_COUNT;
-        show(index);
+        /*
+         * Wrap on the VISIBLE count, not SCREEN_COUNT.
+         *
+         * index walks the visible list, which is rebuilt after every fetch
+         * and is shorter than the enum whenever a screen is hidden -- seven
+         * of ten here, since trials, conversion and failed payments have
+         * nothing to show. Wrapping on the enum sent the index past the end
+         * of the list, where show() clamped it back to slot 0, so MRR was
+         * drawn three extra times in a row and sat on screen for twenty
+         * seconds while every other screen got five. It read as ARPU (the
+         * last visible screen) handing over to a stuck MRR.
+         */
+        if (s_visible_count > 0) {
+            s_slot = (s_slot + 1) % s_visible_count;
+        }
+        show(s_slot);
     }
 
     if (s_have_data && now - s_last_refresh >= REFRESH_MS) {
