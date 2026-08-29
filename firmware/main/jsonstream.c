@@ -38,6 +38,8 @@ static void reset_current(jsonstream_t *js)
     js->cur_unit_amount = 0;
     js->cur_created = 0;
     js->cur_ended = 0;
+    js->cur_period_end = 0;
+    js->cur_cancel_at_end = false;
     js->cur_quantity = 1;
     js->cur_interval_count = 1;
     js->cur_subtotal = 0;
@@ -141,6 +143,25 @@ static void finish_subscription(jsonstream_t *js)
                strcmp(js->cur_status, "past_due") == 0) {
         js->totals.active_count++;
 
+        /*
+         * Notice given, but not yet gone.
+         *
+         * Counted here, inside the active branch, because these subscriptions
+         * are still paying: they stay in active_count and their revenue stays
+         * in mrr_cents. Excluding them would understate today's income for
+         * money that is still arriving. The subtotal is added after the items
+         * are folded, below.
+         */
+        if (js->cur_cancel_at_end) {
+            js->totals.at_risk_count++;
+            if (js->cur_period_end > 0 &&
+                (js->totals.at_risk_soonest == 0 ||
+                 js->cur_period_end < js->totals.at_risk_soonest)) {
+                /* The soonest departure is the deadline worth showing. */
+                js->totals.at_risk_soonest = js->cur_period_end;
+            }
+        }
+
         if (js->cur_currency[0] != '\0') {
             if (js->totals.currency[0] == '\0') {
                 copy_field(js->totals.currency, sizeof(js->totals.currency),
@@ -156,6 +177,15 @@ static void finish_subscription(jsonstream_t *js)
         }
 
         js->totals.mrr_cents += js->cur_subtotal;
+
+        /*
+         * Added after the currency check, so at-risk revenue is only summed
+         * when it is in the same currency as everything else -- a mixed
+         * account bails out above rather than adding dollars to euros here.
+         */
+        if (js->cur_cancel_at_end) {
+            js->totals.at_risk_cents += js->cur_subtotal;
+        }
     }
 
     if (js->cur_tiered) {
@@ -206,6 +236,11 @@ static void apply_token(jsonstream_t *js)
         js->cur_created = strtoll(v, NULL, 10);
     } else if (strcmp(k, "ended_at") == 0) {
         js->cur_ended = strtoll(v, NULL, 10);
+    } else if (strcmp(k, "cancel_at_period_end") == 0) {
+        js->cur_cancel_at_end = (strcmp(v, "true") == 0);
+    } else if (strcmp(k, "current_period_end") == 0 &&
+               js->cur_period_end == 0) {
+        js->cur_period_end = strtoll(v, NULL, 10);
     } else if (strcmp(k, "billing_scheme") == 0) {
         js->cur_tiered = (strcmp(v, "tiered") == 0);
     }

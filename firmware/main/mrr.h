@@ -69,6 +69,17 @@ typedef struct {
      */
     int new_count;              /* created inside the window, still active */
     int churned_count;          /* ended inside the window */
+
+    /*
+     * Subscriptions that have given notice but have not left.
+     *
+     * These are still active and still counted in mrr_cents -- the money is
+     * still arriving. They are tracked separately because they are the only
+     * figure on the device that can still be changed by acting on it.
+     */
+    int at_risk_count;
+    int64_t at_risk_cents;      /* their combined monthly value */
+    int64_t at_risk_soonest;    /* earliest period end, Unix seconds; 0 if none */
     bool has_tiered;            /* any tiered item present */
     bool mixed_currency;        /* more than one currency seen */
     char currency[MRR_CURRENCY_LEN];  /* the currency summed */

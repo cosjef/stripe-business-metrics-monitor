@@ -197,6 +197,14 @@ static void draw_setup_screen(const char *line1)
 static char s_delta[16];
 static char s_comparison[FIELD_LEN];
 /* Flow labels for the PAID SUBS card; borrowed by card_data_t, so static. */
+/* CANCELLED screen: at-risk figures, or plain churn when nobody is leaving. */
+static char s_risk_hero[24];
+static char s_risk_sub[FIELD_LEN];
+static char s_risk_caption[FIELD_LEN];
+static char s_risk_pill[16];
+static bool s_risk_actionable;   /* true when someone has given notice */
+static int s_risk_fill_pct;
+
 static char s_flow_net[16];
 static char s_flow_gained[16];
 static char s_flow_lost[16];
@@ -280,6 +288,24 @@ static void show(int slot)
      * history to show -- a card with a permanently empty bar would be worse
      * than no card.
      */
+    if (id == SCREEN_CANCELLATIONS) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_risk_hero;
+        c.subtitle = s_risk_sub;
+        c.comparison = s_risk_caption;
+        /* Amber only when something is actually at risk; a plain churn count
+         * is ordinary business and stays in the neutral palette. */
+        c.accent_amber = s_risk_actionable;
+        c.has_delta = s_risk_actionable;
+        c.delta = s_risk_pill;
+        c.fill_pct = s_risk_fill_pct;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
+
     if (id == SCREEN_PAID_SUBS && (s_flow_g > 0 || s_flow_l > 0)) {
         card_data_t c = {};
         c.label = s_labels[id];
@@ -391,6 +417,65 @@ static void apply_totals(const mrr_totals_t *t)
              net >= 0 ? "+" : "", net);
     snprintf(s_flow_gained, sizeof(s_flow_gained), "%d joined", s_flow_g);
     snprintf(s_flow_lost, sizeof(s_flow_lost), "%d left", s_flow_l);
+
+    /*
+     * CANCELLED: lead with what can still be changed.
+     *
+     * Seven subscriptions already left -- that is history, and nothing can be
+     * done about it. Two have given notice and are still paying, which is the
+     * only figure on this device that acting on it could still change. So the
+     * at-risk money is the hero when it exists, and the churn count falls
+     * back to the hero when it does not.
+     */
+    s_risk_actionable = (t->at_risk_count > 0);
+
+    if (s_risk_actionable) {
+        format_money_compact(t->at_risk_cents, s_risk_hero, sizeof(s_risk_hero));
+        snprintf(s_risk_sub, sizeof(s_risk_sub), "%d leaving",
+                 t->at_risk_count);
+
+        /*
+         * Days until the soonest departure. That deadline is what makes this
+         * screen actionable rather than informational -- "$42 at risk" is a
+         * fact, "$42 leaving in 15 days" is a prompt.
+         */
+        const time_t now = time(NULL);
+        if (t->at_risk_soonest > 0 && now > CLOCK_SANE_EPOCH) {
+            const long days = (long)((t->at_risk_soonest - (int64_t)now) / 86400);
+            if (days > 0) {
+                snprintf(s_risk_caption, sizeof(s_risk_caption),
+                         "next leaves in %ld days", days);
+            } else {
+                snprintf(s_risk_caption, sizeof(s_risk_caption),
+                         "next leaves today");
+            }
+        } else {
+            snprintf(s_risk_caption, sizeof(s_risk_caption),
+                     "%d left in 30 days", t->churned_count);
+        }
+
+        /* Share of MRR at risk, for the bar. */
+        if (t->mrr_cents > 0) {
+            s_risk_fill_pct = (int)((t->at_risk_cents * 100) / t->mrr_cents);
+            if (s_risk_fill_pct < 2) {
+                s_risk_fill_pct = 2;   /* keep a small share visible */
+            }
+        } else {
+            s_risk_fill_pct = 0;
+        }
+        snprintf(s_risk_pill, sizeof(s_risk_pill), "%d%% MRR",
+                 t->mrr_cents > 0
+                     ? (int)((t->at_risk_cents * 100) / t->mrr_cents) : 0);
+    } else {
+        /* Nobody leaving: fall back to plain churn rather than showing $0. */
+        format_count(t->churned_count, s_risk_hero, sizeof(s_risk_hero));
+        snprintf(s_risk_sub, sizeof(s_risk_sub), "cancelled");
+        snprintf(s_risk_caption, sizeof(s_risk_caption), "last 30 days");
+        s_risk_pill[0] = '\0';
+        s_risk_fill_pct = 0;
+    }
+
+    s_rot_state.churned_30d = t->churned_count;
 }
 
 /* ---- time and history ---- */
@@ -530,6 +615,9 @@ static void refresh(void)
                   (long long)totals.mrr_cents, totals.active_count,
                   totals.trial_count, totals.new_count, totals.churned_count,
                   truncated ? " (TRUNCATED)" : "");
+    Serial.printf("at risk: %d sub(s), %lld cents/mo, soonest %lld\n",
+                  totals.at_risk_count, (long long)totals.at_risk_cents,
+                  (long long)totals.at_risk_soonest);
 }
 
 /* ---- portal callbacks ---- */

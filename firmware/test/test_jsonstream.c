@@ -365,6 +365,96 @@ static void test_flow_without_window(void)
     check_int("but actives are still counted", t->active_count, 2);
 }
 
+/*
+ * At-risk revenue: subscriptions that have given notice but have not left.
+ *
+ * This is the only genuinely actionable figure the device can show. Everything
+ * else reports what already happened; these subscriptions are still paying and
+ * their departure date has not arrived. The parser has to separate them from
+ * both the healthy actives (they still count toward MRR today) and the
+ * already-churned (those are history).
+ */
+static const char *RISK_PAGE =
+    "{\"object\":\"list\",\"has_more\":false,\"data\":["
+    /* giving notice: still active, still paying, but leaving */
+    "{\"id\":\"sub_leaving\",\"status\":\"active\",\"created\":1700000000,"
+    "\"cancel_at_period_end\":true,\"current_period_end\":1757000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":2900,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* a second one, leaving sooner -- the soonest date is what gets shown */
+    "{\"id\":\"sub_leaving2\",\"status\":\"active\",\"created\":1700000000,"
+    "\"cancel_at_period_end\":true,\"current_period_end\":1756600000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":1300,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* healthy: not leaving */
+    "{\"id\":\"sub_ok\",\"status\":\"active\",\"created\":1700000000,"
+    "\"current_period_end\":1757000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":4900,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}}"
+    "]}";
+
+static void test_at_risk(void)
+{
+    printf("subscriptions that have given notice\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_feed(&js, RISK_PAGE, strlen(RISK_PAGE));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+
+    check_int("two are leaving", t->at_risk_count, 2);
+    check_i64("their combined monthly value", t->at_risk_cents, 4200);
+
+    /*
+     * They are still active and still paying, so they must remain in both the
+     * active count and MRR. Excluding them would understate today's revenue
+     * for money that is still arriving.
+     */
+    check_int("all three still count as active", t->active_count, 3);
+    check_i64("at-risk revenue is still in MRR", t->mrr_cents, 9100);
+
+    /* The soonest departure is the one worth naming: it is the deadline. */
+    check_i64("soonest period end", t->at_risk_soonest, 1756600000);
+}
+
+static void test_at_risk_byte_at_a_time(void)
+{
+    printf("at-risk survives byte-at-a-time feeding\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    for (const char *p = RISK_PAGE; *p; p++) {
+        jsonstream_feed(&js, p, 1);
+    }
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+    check_int("same count", t->at_risk_count, 2);
+    check_i64("same value", t->at_risk_cents, 4200);
+    check_i64("same soonest", t->at_risk_soonest, 1756600000);
+}
+
+/* Nobody leaving: the figures stay zero rather than reporting a false alarm. */
+static void test_no_one_at_risk(void)
+{
+    printf("nobody leaving means nothing at risk\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_feed(&js, TWO_SUBS, strlen(TWO_SUBS));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+    check_int("none at risk", t->at_risk_count, 0);
+    check_i64("nothing at risk", t->at_risk_cents, 0);
+    check_i64("no departure date", t->at_risk_soonest, 0);
+}
+
 int main(void)
 {
     test_single_chunk();
@@ -378,6 +468,9 @@ int main(void)
     test_flow_counts();
     test_flow_byte_at_a_time();
     test_flow_without_window();
+    test_at_risk();
+    test_at_risk_byte_at_a_time();
+    test_no_one_at_risk();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

@@ -68,6 +68,8 @@ typedef struct {
     int64_t cur_subtotal;      /* summed items for this subscription */
     int64_t cur_created;       /* subscription created, Unix seconds */
     int64_t cur_ended;         /* subscription ended, 0 if it has not */
+    int64_t cur_period_end;    /* current period end, Unix seconds */
+    bool cur_cancel_at_end;    /* notice given: leaving at period end */
     bool cur_tiered;
     bool in_subscription;
     bool item_has_price;

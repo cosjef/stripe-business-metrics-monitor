@@ -70,6 +70,13 @@ typedef struct {
     const char *flow_gained_label;   /* "10 joined" */
     const char *flow_lost_label;     /* "7 left" */
 
+    /*
+     * Accent override. The card is green-for-gain by default; an at-risk or
+     * warning card is amber. Amber and not red: a notice is a degraded state,
+     * not a threshold breach, and red stays reserved for FAILED (spec 4.2).
+     */
+    _Bool accent_amber;
+
     int dot_index;
     int dot_count;
 } card_data_t;
