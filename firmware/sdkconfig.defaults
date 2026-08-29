@@ -48,3 +48,6 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 # means the device boots and logs normally into a pin nobody is listening to,
 # which looks exactly like a dead board.
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# Temporary: bisect test -- run Waveshare's demo inside our project.
+CONFIG_LV_USE_DEMO_WIDGETS=y

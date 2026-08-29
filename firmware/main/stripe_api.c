@@ -1,4 +1,6 @@
 #include "stripe_api.h"
+
+#include "jsonstream.h"
 #include "stripe_key.h"
 #include "stripe_parse.h"
 #include "events.h"
@@ -53,7 +55,11 @@ static const char *TAG = "stripe";
  * buffer, so each is ~1.2KB rather than the 800 bytes I first estimated.
  * Seven leaves a quarter of the buffer spare for larger-than-average objects.
  */
-#define SUBS_PAGE_LIMIT 1
+/*
+ * 100 again -- Stripe's maximum. The streaming scanner does not hold the
+ * response, so page size no longer costs memory; it only costs round trips.
+ */
+#define SUBS_PAGE_LIMIT 100
 /*
  * 12KB, measured not guessed. The largest contiguous block at the moment the
  * body arrives is ~15.8KB (mbedTLS still holds its session), so a 16KB request
@@ -67,7 +73,7 @@ static const char *TAG = "stripe";
  * buffer, so each is ~1.2KB rather than the 800 bytes I first estimated.
  * Seven leaves a quarter of the buffer spare for larger-than-average objects.
  */
-#define SUBS_PAGE_LIMIT 10
+#define SUBS_PAGE_LIMIT 100
 #define SUBS_BUF_LEN    (512 * 1024)
 #endif
 
@@ -121,6 +127,25 @@ void stripe_set_key(const char *key)
     stripe_key_redact(s_key, redacted, sizeof(redacted));
     ESP_LOGI(TAG, "key set: %s (%s mode)", redacted,
              stripe_key_is_test_mode(s_key) ? "test" : "live");
+}
+
+/*
+ * Streaming handler: feed each chunk to the scanner and keep nothing.
+ *
+ * Used for subscriptions, which is the only response large enough to matter.
+ * The others stay on the buffering handler because they are small and their
+ * parsers already work.
+ */
+static esp_err_t on_http_event_stream(esp_http_client_event_t *evt)
+{
+    jsonstream_t *js = (jsonstream_t *)evt->user_data;
+
+    if (evt->event_id != HTTP_EVENT_ON_DATA || js == NULL) {
+        return ESP_OK;
+    }
+
+    jsonstream_feed(js, (const char *)evt->data, (size_t)evt->data_len);
+    return ESP_OK;
 }
 
 static esp_err_t on_http_event(esp_http_client_event_t *evt)
@@ -292,28 +317,26 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
         return STRIPE_ERR_UNAUTHORIZED;
     }
     /*
-     * Fold each page into a running total rather than collecting every
-     * subscription. An earlier attempt kept them all and computed MRR once at
-     * the end; that held a 25KB parse buffer plus an array for the whole loop,
-     * and the fragmentation left too small a contiguous block for the response
-     * buffer -- so every page failed. Peak memory here is one page.
+     * Streaming fetch.
+     *
+     * The body is parsed as it arrives and never assembled: jsonstream_t is
+     * 912 bytes against the 35,920 that buffer-then-parse needed, which is
+     * what makes limit=100 affordable again on a board whose largest free
+     * block is ~15KB. Pagination remains for accounts above 100, but for most
+     * it is now a single request.
      */
-    mrr_totals_t acc = {0};
-    bool any_truncated = false;
-    char cursor[STRIPE_ID_LEN] = "";
-    char prev_cursor[STRIPE_ID_LEN] = "";
+    jsonstream_t *js = heap_caps_malloc(sizeof(jsonstream_t), STRIPE_BUF_CAPS);
+    if (js == NULL) {
+        return STRIPE_ERR_NO_MEMORY;
+    }
+    jsonstream_init(js);
+
+    char cursor[JSONSTREAM_TOKEN_MAX] = "";
+    char prev_cursor[JSONSTREAM_TOKEN_MAX] = "";
     stripe_result_t result = STRIPE_OK;
+    int pages = 0;
 
     for (int page = 0; page < SUBS_MAX_PAGES; page++) {
-        response_t resp = { .buf = NULL, .len = 0, .cap = SUBS_BUF_LEN };
-
-        stripe_subs_t *parsed =
-            heap_caps_malloc(sizeof(stripe_subs_t), STRIPE_BUF_CAPS);
-        if (parsed == NULL) {
-            result = STRIPE_ERR_NO_MEMORY;
-            break;
-        }
-
         char subs_url[256];
         if (cursor[0] == '\0') {
             snprintf(subs_url, sizeof(subs_url), SUBS_URL_FMT, SUBS_PAGE_LIMIT);
@@ -326,14 +349,13 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
             .url = subs_url,
             .method = HTTP_METHOD_GET,
             .timeout_ms = HTTP_TIMEOUT_MS,
-            .event_handler = on_http_event,
-            .user_data = &resp,
+            .event_handler = on_http_event_stream,
+            .user_data = js,
             .crt_bundle_attach = esp_crt_bundle_attach,
         };
 
         esp_http_client_handle_t client = esp_http_client_init(&cfg);
         if (client == NULL) {
-            heap_caps_free(parsed);
             result = STRIPE_ERR_NO_MEMORY;
             break;
         }
@@ -349,8 +371,6 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
                          ? STRIPE_ERR_TLS : STRIPE_ERR_NETWORK;
             ESP_LOGE(TAG, "page %d failed: %s", page, esp_err_to_name(err));
             esp_http_client_cleanup(client);
-            if (resp.buf) { heap_caps_free(resp.buf); }
-            heap_caps_free(parsed);
             break;
         }
 
@@ -358,79 +378,49 @@ stripe_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
         result = classify_status(status);
         esp_http_client_cleanup(client);
 
-        if (result != STRIPE_OK || resp.buf == NULL) {
-            if (result == STRIPE_OK) {
-                ESP_LOGW(TAG, "HTTP %d but no body on page %d", status, page);
-                result = STRIPE_ERR_BAD_RESPONSE;
-            }
-            if (resp.buf) { heap_caps_free(resp.buf); }
-            heap_caps_free(parsed);
+        if (result != STRIPE_OK) {
+            ESP_LOGE(TAG, "subscriptions page %d: HTTP %d", page, status);
             break;
         }
 
-        if (!stripe_parse_subscriptions(resp.buf, parsed)) {
-            ESP_LOGE(TAG, "page %d did not parse (%u bytes)", page,
-                     (unsigned)resp.len);
-            heap_caps_free(resp.buf);
-            heap_caps_free(parsed);
-            result = STRIPE_ERR_BAD_RESPONSE;
+        pages++;
+
+        /* Close out whatever object the page ended on before deciding
+         * whether to ask for another. */
+        jsonstream_finish(js);
+
+        if (!jsonstream_has_more(js)) {
             break;
         }
 
-        ESP_LOGI(TAG, "subscriptions page %d: %u bytes, %d subs (%u B/sub)%s",
-                 page, (unsigned)resp.len, parsed->sub_count,
-                 parsed->sub_count ? (unsigned)(resp.len / parsed->sub_count) : 0u,
-                 parsed->has_more ? ", more" : "");
-
-        const mrr_totals_t page_totals =
-            mrr_compute(parsed->subs, parsed->sub_count);
-        mrr_totals_merge(&acc, &page_totals);
-        any_truncated = any_truncated || parsed->truncated;
-
-        const bool more = parsed->has_more;
-        const int page_subs = parsed->sub_count;
-        snprintf(cursor, sizeof(cursor), "%s", parsed->last_id);
-
-        heap_caps_free(resp.buf);
-        heap_caps_free(parsed);
-
-        /*
-         * Stop on has_more or a missing cursor -- NOT on page_subs == 0.
-         *
-         * A page can legitimately contain zero COUNTABLE subscriptions while
-         * still holding an object: cancelled and incomplete statuses are
-         * parsed for the cursor but excluded from MRR. Treating that as "end
-         * of list" stopped the walk at page 10 of 30 and under-reported by
-         * two thirds. The cursor is what proves progress, so an unchanged
-         * cursor is the real infinite-loop guard.
-         */
-        (void)page_subs;
-        if (!more || cursor[0] == '\0') {
-            break;
-        }
-
-        if (strcmp(cursor, prev_cursor) == 0) {
-            ESP_LOGW(TAG, "cursor did not advance on page %d; stopping", page);
+        snprintf(cursor, sizeof(cursor), "%s", jsonstream_last_id(js));
+        if (cursor[0] == '\0' || strcmp(cursor, prev_cursor) == 0) {
+            /* No cursor, or it did not advance: stop rather than loop. */
+            ESP_LOGW(TAG, "cursor did not advance after page %d", page);
             break;
         }
         snprintf(prev_cursor, sizeof(prev_cursor), "%s", cursor);
     }
 
     if (result != STRIPE_OK) {
+        heap_caps_free(js);
         return result;
     }
 
-    *out = acc;
+    *out = *jsonstream_totals(js);
 
     if (truncated) {
-        *truncated = any_truncated;
+        /* Only true if we stopped at the page cap with more to come. */
+        *truncated = jsonstream_has_more(js);
     }
 
-    ESP_LOGI(TAG, "MRR %lld cents, %d active, %d trials%s%s",
+    ESP_LOGI(TAG, "MRR %lld cents, %d active, %d trials, %d page%s%s%s",
              (long long)out->mrr_cents, out->active_count, out->trial_count,
+             pages, pages == 1 ? "" : "s",
              out->has_tiered ? " (tiered present)" : "",
              out->mixed_currency ? " (MIXED CURRENCY)" : "");
 
+    heap_caps_free(js);
     return STRIPE_OK;
 }
 

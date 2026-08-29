@@ -153,9 +153,17 @@ esp_err_t axp2101_init(void)
      * display driver sends its first command, which is why it lives here
      * rather than in display.c.
      */
-    if (axp2101_pulse_panel_reset() != ESP_OK) {
-        ESP_LOGW(TAG, "panel reset pulse failed; display may stay dark");
-    }
+    /*
+     * No ALDO3 pulse.
+     *
+     * Clawdmeter cycles ALDO3 as a panel reset, and I copied that. Waveshare's
+     * own working example for this board does not: it sets ALDO3 to 3.3V,
+     * enables it, and leaves it alone. Their demo drives the panel correctly,
+     * so the pulse is either unnecessary here or actively harmful -- cycling
+     * the rail after the panel has powered up can leave it in an
+     * indeterminate state, which is what a dark screen with successful init
+     * looks like.
+     */
 
     ESP_LOGI(TAG, "PMIC up at 0x%02X, ALDO1-4 at %dmV",
              AXP2101_I2C_ADDR, AXP_BOARD_ALDO_MV);

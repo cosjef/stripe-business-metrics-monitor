@@ -22,6 +22,7 @@
  *     exist and are pixel-tested, but no live data yet triggers them.
  */
 #include "display.h"
+#include "fonts/fonts.h"
 #include "board_config.h"
 #include "layout.h"
 #include "hero_size.h"
@@ -46,7 +47,9 @@
 #include "colortest.h"
 
 #include "esp_log.h"
-#include "esp_lvgl_port.h"
+/* esp_lv_adapter replaces esp_lvgl_port: the port has no QSPI display
+ * registration and could not drive this panel past its first frame. */
+
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -89,7 +92,6 @@ static struct {
 } s_values[SCREEN_COUNT];
 
 static int s_index = 0;
-static esp_timer_handle_t s_rotation_timer = NULL;
 
 /* Tracks how old the displayed data is, which drives State A (spec 6.2). */
 static freshness_t s_freshness;
@@ -471,10 +473,10 @@ static void show_current(const char *why)
         char errcode[24];
         snprintf(errcode, sizeof(errcode), "err %d", s_auth_status);
 
-        lvgl_port_lock(0);
+        display_lock(-1);
         screen_draw_auth_error(lv_screen_active(), "Stripe key", "rejected",
                                "check permissions", errcode);
-        lvgl_port_unlock();
+        display_unlock();
 
         ESP_LOGE(TAG, "AUTH FAILED (HTTP %d) -- key rejected (%s)",
                  s_auth_status, why);
@@ -501,10 +503,10 @@ static void show_current(const char *why)
             snprintf(footer, sizeof(footer), "retrying");
         }
 
-        lvgl_port_lock(0);
+        display_lock(-1);
         screen_draw_stale(lv_screen_active(), s_rotation[id].label,
                           s_rotation[id].hero, banner, footer);
-        lvgl_port_unlock();
+        display_unlock();
 
         ESP_LOGW(TAG, "[%d/%d] %s: '%s' STALE %s (%s)",
                  s_index + 1, s_visible_count, s_rotation[id].label,
@@ -537,11 +539,11 @@ static void show_current(const char *why)
         char volts[24];
         snprintf(volts, sizeof(volts), "%d.%02dV", mv / 1000, (mv % 1000) / 10);
 
-        lvgl_port_lock(0);
+        display_lock(-1);
         screen_draw_battery(lv_screen_active(), pct_str,
                             critical ? "shutting down soon" : "plug in soon",
                             volts, critical);
-        lvgl_port_unlock();
+        display_unlock();
 
         ESP_LOGW(TAG, "BATTERY %s: %dmV (%d%%) (%s)",
                  critical ? "CRITICAL" : "LOW", mv, pct, why);
@@ -561,9 +563,25 @@ static void show_current(const char *why)
     d.dot_index = s_index;
     d.dot_count = s_visible_count;
 
-    lvgl_port_lock(0);
-    screen_draw_rotation(lv_screen_active(), &d);
-    lvgl_port_unlock();
+
+    if (!display_lock(-1)) {
+        ESP_LOGE(TAG, "LVGL lock failed");
+    } else {
+        screen_draw_rotation(lv_screen_active(), &d);
+        lv_obj_invalidate(lv_screen_active());
+        display_unlock();
+
+        /*
+         * Stack headroom of whichever task just drew.
+         *
+         * screen_draw_rotation builds a dozen LVGL objects with 137px fonts.
+         * The probe that rendered correctly ran from app_main, which has a
+         * large stack; the rotation task has 4096 bytes. A task that overflows
+         * here would corrupt memory rather than fault cleanly, which is
+         * consistent with a screen that goes blank while every call reports
+         * success.
+         */
+    }
 
     ESP_LOGI(TAG, "[%d/%d] %s: '%s' at %dpx (%s)",
              s_index + 1, s_visible_count, d.label, d.hero,
@@ -576,10 +594,25 @@ static void advance(const char *why)
     show_current(why);
 }
 
-static void rotate_cb(void *arg)
+/*
+ * Rotation runs in its own task, not in the esp_timer callback.
+ *
+ * esp_timer callbacks execute in the high-priority timer task, where blocking
+ * is not allowed. Taking the LVGL lock there either fails outright or stalls
+ * the timer service, so the draw never lands -- which is exactly what we saw:
+ * the log reported a redraw every five seconds while the glass held its first
+ * frame. Drawing the same screen from app_main worked, which is what isolated
+ * this.
+ *
+ * A task can block on the lock safely, so the draw completes.
+ */
+static void rotation_task(void *arg)
 {
     (void)arg;
-    advance("timer");
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(ROTATION_INTERVAL_MS));
+        advance("timer");
+    }
 }
 
 /*
@@ -593,10 +626,8 @@ static void on_button_press(void)
 {
     advance("button");
 
-    if (s_rotation_timer) {
-        esp_timer_stop(s_rotation_timer);
-        esp_timer_start_periodic(s_rotation_timer, ROTATION_INTERVAL_MS * 1000);
-    }
+    /* The rotation task paces itself; there is no timer to restart. A manual
+     * advance simply shortens the current dwell by however long it had left. */
 }
 
 
@@ -606,10 +637,10 @@ static volatile bool s_restart_pending = false;
 
 static void show_setup_screen(void)
 {
-    lvgl_port_lock(0);
+    display_lock(-1);
     screen_draw_setup(lv_screen_active(), "Join wifi", s_setup_ssid,
                       "then open browser", FIRMWARE_VERSION);
-    lvgl_port_unlock();
+    display_unlock();
     ESP_LOGI(TAG, "setup mode: join \"%s\"", s_setup_ssid);
 }
 
@@ -711,10 +742,10 @@ static void run_key_setup_mode(void)
                                      ssid, pass));
     ESP_ERROR_CHECK(portal_start(on_credentials, on_stripe_key, true));
 
-    lvgl_port_lock(0);
+    display_lock(-1);
     screen_draw_setup(lv_screen_active(), "Add Stripe key", s_setup_ssid,
                       "then open browser", FIRMWARE_VERSION);
-    lvgl_port_unlock();
+    display_unlock();
 
     ESP_LOGI(TAG, "key setup: join \"%s\", go to http://192.168.4.1/key",
              s_setup_ssid);
@@ -837,9 +868,9 @@ static void refresh_task(void *arg)
                  * been re-issued with the same value, or scope restored. */
                 s_auth_failed = false;
 
-                lvgl_port_lock(0);
+                display_lock(-1);
                 apply_totals(&totals, truncated);
-                lvgl_port_unlock();
+                display_unlock();
                 any_success = true;
                 next_full_ms = now_ms + REFRESH_INTERVAL_MS;
             } else if (r == STRIPE_ERR_UNAUTHORIZED) {
@@ -875,9 +906,9 @@ static void refresh_task(void *arg)
 
             event_totals_t ev = {0};
             if (stripe_fetch_events_since(lookback, day_start, &ev) == STRIPE_OK) {
-                lvgl_port_lock(0);
+                display_lock(-1);
                 apply_events(&ev);
-                lvgl_port_unlock();
+                display_unlock();
                 any_success = true;
             }
         }
@@ -899,7 +930,7 @@ static void refresh_task(void *arg)
                 s_rot_state.failed_count = failed_count;
                 s_last_failed_cents = failed_cents;
 
-                lvgl_port_lock(0);
+                display_lock(-1);
                 format_money_compact(failed_cents,
                                      s_values[SCREEN_FAILED].hero, FIELD_LEN);
                 /* "retrying" is accurate and useful context: Stripe keeps
@@ -911,7 +942,7 @@ static void refresh_task(void *arg)
                 s_rotation[SCREEN_FAILED].subtitle =
                     s_values[SCREEN_FAILED].subtitle;
                 rebuild_rotation();
-                lvgl_port_unlock();
+                display_unlock();
 
                 any_success = true;
             } else if (fr == STRIPE_ERR_UNAUTHORIZED) {
@@ -975,13 +1006,10 @@ static void run_normal_mode(void)
     }
     show_current("boot");
 
-    const esp_timer_create_args_t timer_args = {
-        .callback = rotate_cb,
-        .name = "rotation",
-    };
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_rotation_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(s_rotation_timer,
-                                             ROTATION_INTERVAL_MS * 1000));
+    /* 8192, not 4096. Measured headroom was a stable 2156 bytes, so this was
+     * not overflowing -- but LVGL draw depth varies with content and the
+     * margin was thinner than the boot draw's 6248. Cheap insurance. */
+    xTaskCreate(rotation_task, "rotation", 8192, NULL, 3, NULL);
 
     ESP_LOGI(TAG, "rotating %d screens every %dms",
              s_visible_count, ROTATION_INTERVAL_MS);
@@ -1037,17 +1065,25 @@ void app_main(void)
      * more useful than an abort, since everything except the screen still
      * works and the log will say why.
      */
-    if (axp2101_init() != ESP_OK) {
-        ESP_LOGW(TAG, "PMIC init failed; the display will likely stay dark");
-    }
-
+    /*
+     * No axp2101_init() here.
+     *
+     * Waveshare's vendored BSP brings the PMIC up itself, inside
+     * display_init(), using its own I2C bus object. Calling ours as well made
+     * both claim I2C port 0 -- "bus id(0) has already been acquired" -- and
+     * the second claim failed, leaving the display half-initialised.
+     *
+     * Our axp2101.c stays in the build for battery reads, but the BSP owns
+     * bring-up now.
+     */
     ESP_ERROR_CHECK(display_init());
+
     ESP_ERROR_CHECK(settings_init());
 
 #if COLORTEST_ENABLED
-    lvgl_port_lock(0);
+    display_lock(-1);
     colortest_draw();
-    lvgl_port_unlock();
+    display_unlock();
     ESP_LOGI(TAG, "color test rendered");
     return;
 #endif

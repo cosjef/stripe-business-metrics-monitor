@@ -388,6 +388,64 @@ static void test_battery_screen(void)
     check_int("no green on a battery warning", count_color(COLOR_GREEN), 0);
 }
 
+/*
+ * Redrawing must not rebuild the object tree.
+ *
+ * screen_draw_rotation originally called lv_obj_clean() and recreated every
+ * label on each draw. On the C6's QSPI AMOLED that destroyed the display's
+ * bound state: the first frame rendered and every later one was discarded
+ * while every call still reported success. It presented as a driver fault, a
+ * locking fault, a task fault and a buffer fault in turn.
+ *
+ * Proven on hardware: a build that created labels once and only changed their
+ * text updated correctly every five seconds, where the rebuilding version
+ * froze on frame one.
+ *
+ * So the invariant is that the second and subsequent draws reuse objects. A
+ * changing child count means the tree is being rebuilt.
+ */
+static void test_redraw_reuses_objects(void)
+{
+    current_screen = "reuse";
+    printf("redrawing updates objects instead of recreating them\n");
+
+    const screen_data_t a = {
+        .label = "MRR", .hero = "$1.1k", .subtitle = "+$82 today",
+        .dot_index = 0, .dot_count = 7,
+    };
+    const screen_data_t b = {
+        .label = "ANNUAL RUN RATE", .hero = "$13k", .subtitle = "",
+        .dot_index = 1, .dot_count = 7,
+    };
+
+    screen_draw_rotation(harness_screen(), &a);
+    harness_render();
+    const uint32_t after_first = lv_obj_get_child_count(harness_screen());
+    check_true("first draw creates objects", after_first > 0);
+
+    screen_draw_rotation(harness_screen(), &b);
+    harness_render();
+    const uint32_t after_second = lv_obj_get_child_count(harness_screen());
+
+    check_int("second draw reuses the same objects",
+              (int)after_second, (int)after_first);
+
+    /* And the content actually changed. */
+    check_true("the new label is on screen", count_color(COLOR_MUTED) > 20);
+    check_true("the new hero is on screen", count_color(COLOR_PRIMARY) > 200);
+
+    /* A third draw with a different dot count must still not grow the tree
+     * unboundedly -- conditional screens change how many dots are shown. */
+    const screen_data_t c = {
+        .label = "ARPU", .hero = "$33", .subtitle = "",
+        .dot_index = 2, .dot_count = 5,
+    };
+    screen_draw_rotation(harness_screen(), &c);
+    harness_render();
+    check_true("a different dot count does not grow the tree",
+               lv_obj_get_child_count(harness_screen()) <= after_first);
+}
+
 /* ---- state screens ---- */
 
 /*
@@ -512,6 +570,7 @@ int main(void)
     test_green_discipline();
     test_red_discipline();
     test_battery_screen();
+    test_redraw_reuses_objects();
     test_stale_screen();
     test_auth_error_screen();
     test_setup_screen();

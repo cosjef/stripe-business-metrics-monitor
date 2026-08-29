@@ -2,12 +2,22 @@ dependencies:
   # Debounce and click detection for the front-panel buttons.
   espressif/button: ^4.1.0
   idf: '>=5.4'
-  espressif/esp_lvgl_port: ^2.6.0
+  # esp_lvgl_adapter, not esp_lvgl_port.
+  #
+  # The port has no QSPI-specific display registration -- it treats a QSPI
+  # panel as generic SPI. The adapter's own migration guide lists "unified
+  # display registration for MIPI DSI / RGB / SPI / I2C / I80 / QSPI" as the
+  # first thing it adds, along with tearing avoidance and TE synchronisation.
+  #
+  # This is what Waveshare's working example uses on this exact board, and
+  # their unmodified demo animates the panel correctly where ours could not
+  # update it after the first frame.
+  espressif/esp_lvgl_adapter: ^0.3.0
   # C6 AMOLED panel (CO5300, SH8601-compatible protocol) over QSPI.
   # 2.x, matching the version Waveshare's working factory firmware reports in
   # its boot log ("sh8601: LCD panel create success, version: 2.0.1"). The 1.x
   # series is what ^1.0.0 resolved to and it did not drive this panel.
-  espressif/esp_lcd_sh8601: ^2.0.0
+  espressif/esp_lcd_sh8601: ^1.0.0
   # Capacitive touch. Waveshare's own driver package for this board.
   waveshare/esp_lcd_touch_cst9217: ^1.0.4
   lvgl/lvgl: ^9.3.0

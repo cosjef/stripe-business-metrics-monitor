@@ -89,5 +89,5 @@
  * JSON parse. Revisit once the fetch path is paginated and its real footprint
  * is known.
  */
-#define LCD_DRAW_BUFF_HEIGHT (60)
+#define LCD_DRAW_BUFF_HEIGHT (100)   /* matches Waveshare's working example */
 #define LCD_DRAW_BUFF_DOUBLE (1)
