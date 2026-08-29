@@ -404,11 +404,23 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     }
     s_rot.screen = NULL;   /* the rotation layout must rebuild if it returns */
 
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int bar_w = card_w - 2 * CARD_PAD;
+    const int inner_x = PAD_PX + CARD_PAD;
+
     lv_label_set_text(s_card.label, data->label);
     lv_label_set_text(s_card.subtitle, data->subtitle ? data->subtitle : "");
 
-    /* Hero: size follows the value, so only touch the font when it changes. */
-    const int hero_px = hero_size_for_text(data->hero);
+    /*
+     * Hero: sized to the CARD's column, not the panel's.
+     *
+     * The card insets its text by CARD_PAD on both sides, so it offers less
+     * width than TEXT_COLUMN_PX. Sizing to the panel column put "$13,276"
+     * seven pixels past the card's outer edge and overflowed "$42.00" at the
+     * cap -- legible, so it read as a padding nit rather than the sizing bug
+     * it was.
+     */
+    const int hero_px = hero_size_for_width(data->hero, bar_w);
     if (hero_px != s_card.hero_px) {
         lv_obj_set_style_text_font(s_card.hero, font_for_size(hero_px), 0);
         s_card.hero_px = hero_px;
@@ -419,7 +431,7 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     lv_label_set_text(s_card.hero, data->hero);
 
     if (hero_px != s_card.hero_pos_px) {
-        lv_obj_set_pos(s_card.hero, PAD_PX + CARD_PAD,
+        lv_obj_set_pos(s_card.hero, inner_x,
                        baseline_to_top(CARD_Y + CARD_HERO_BASELINE_DY,
                                        (int)lv_font_get_line_height(font_for_size(hero_px)),
                                        (int)font_for_size(hero_px)->base_line));
@@ -435,10 +447,6 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
      * coming, without asserting one it has not measured. Spec 1 principle 4:
      * it never lies, and a plausible-looking 0.0% would be a lie.
      */
-    const int card_w = PANEL_PX - 2 * PAD_PX;
-    const int bar_w = card_w - 2 * CARD_PAD;
-    const int inner_x = PAD_PX + CARD_PAD;
-
     if (data->has_flow) {
         /*
          * Flow: one run flush-left, lost then gained, split by proportion.

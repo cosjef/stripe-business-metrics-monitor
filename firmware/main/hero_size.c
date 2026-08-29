@@ -29,7 +29,7 @@
  * sdkconfig.h, so CONFIG_IDF_TARGET_ESP32C6 never appears there and the C6
  * would quietly take the S3 ladder. Must match the condition in layout.h. */
 #if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(BOARD_C6_AMOLED_216)
-const int hero_font_sizes[] = {35, 46, 58, 74, 86, 92, 108, 126, 137};
+const int hero_font_sizes[] = {35, 46, 58, 74, 86, 92, 104, 108, 120, 126, 137};
 #else
 const int hero_font_sizes[] = {24, 32, 40, 52, 60, 64, 76, 88, 96};
 #endif
@@ -114,6 +114,31 @@ int text_width_px(const char *text, int size_px)
 _Bool text_fits(const char *text, int size_px)
 {
     return text_width_px(text, size_px) <= TEXT_COLUMN_PX;
+}
+
+int hero_size_for_width(const char *text, int column_px)
+{
+    if (text == NULL || text[0] == '\0' || column_px <= 0) {
+        return 0;
+    }
+
+    /* Largest available size that fits the given column, never above the cap.
+     * Walks the ladder downward, so the result is always a size we ship a
+     * font for. */
+    for (int i = (int)hero_font_sizes_count - 1; i >= 0; i--) {
+        const int size = hero_font_sizes[i];
+        if (size > SIZE_HERO_MAX) {
+            continue;
+        }
+        if (text_width_px(text, size) <= column_px) {
+            return size;
+        }
+    }
+
+    /* Nothing fits: the smallest we have is the honest answer. Clipping a
+     * legible-but-too-wide number is better than returning a size with no
+     * font behind it. */
+    return hero_font_sizes[0];
 }
 
 int hero_size_for_text(const char *text)

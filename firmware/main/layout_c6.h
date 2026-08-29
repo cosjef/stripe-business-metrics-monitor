@@ -76,7 +76,12 @@
 #define C6_CARD_Y               (76)    /* below the label row */
 #define C6_CARD_H               (300)   /* to just above the dots */
 #define C6_CARD_RADIUS          (16)
-#define C6_CARD_PAD             (28)    /* inner inset, > PAD_PX for depth */
+/*
+ * Inner inset. Was 28, which read well but cost 56px of the card's 434 --
+ * enough that "$13,276" had to drop a font step it did not need to. 20 still
+ * separates the text from the card edge while giving the hero room.
+ */
+#define C6_CARD_PAD             (20)
 
 /* Rows inside the card, as offsets from its top. */
 #define C6_CARD_SUBTITLE_DY     (22)

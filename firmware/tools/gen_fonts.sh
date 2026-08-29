@@ -46,7 +46,9 @@ HERO_SIZES=(24 32 40 52 60 64 76 88 96)
 # pixels but only 1.4x the physical size, so each size is the S3 value scaled by
 # the density ratio (~1.43) to keep the same millimetre height. Derived in
 # geometry.c and asserted in test_layout_c6.c.
-C6_HERO_SIZES=(35 46 58 74 86 92 108 126 137)
+# 104 and 120 fill the coarse gap between 92 and 126: values landing there
+# were losing up to 12px of type they had room for inside a card.
+C6_HERO_SIZES=(35 46 58 74 86 92 104 108 120 126 137)
 # Footer (18), label (20), subtitle (22).
 UI_SIZES=(18 20 22)
 

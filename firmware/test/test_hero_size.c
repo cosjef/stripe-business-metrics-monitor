@@ -201,6 +201,48 @@ static void test_unknown_glyphs(void)
                hero_size_for_text("~~~") >= ABSOLUTE_FLOOR_PX);
 }
 
+/*
+ * Sizing to a narrower column than the panel's.
+ *
+ * The card layout insets its text by CARD_PAD on both sides, so a hero drawn
+ * inside a card has less room than one drawn against the panel column. Sizing
+ * every hero to TEXT_COLUMN_PX meant three of the five card screens rendered
+ * text past the card's edge -- "$13,276" ended 7px beyond the card's outer
+ * boundary, and "$42.00" at the 137px cap overflowed too. The value was
+ * legible, so it read as a padding nit rather than the sizing bug it was.
+ */
+static void test_size_for_width(void)
+{
+    printf("sizing to an arbitrary column width\n");
+
+    /* The panel column and the card column give different answers for the
+     * same string -- that difference is the whole point. */
+    const int narrow_col = TEXT_COLUMN_PX / 2;
+    const int panel = hero_size_for_width("$13,276", TEXT_COLUMN_PX);
+    const int card  = hero_size_for_width("$13,276", narrow_col);
+    check_true("a narrower column picks a smaller size", card < panel);
+
+    /* Whatever it picks must actually fit. */
+    check_true("the chosen size fits the narrow column",
+               text_width_px("$13,276", card) <= narrow_col);
+    check_true("the chosen size fits the panel column",
+               text_width_px("$13,276", panel) <= TEXT_COLUMN_PX);
+
+    /* The old entry point keeps its meaning: the full panel column. */
+    check_int("hero_size_for_text still sizes to the panel column",
+              hero_size_for_text("$13,276"), panel);
+
+    /* A value at the cap must still be stepped down when the column is
+     * narrow -- this is the "$42.00" case that overflowed. */
+    const int narrow = hero_size_for_width("$42.00", narrow_col);
+    check_true("a capped value is stepped down for a narrow column",
+               text_width_px("$42.00", narrow) <= narrow_col);
+
+    /* A short value is unaffected either way. */
+    check_int("short values are unchanged",
+              hero_size_for_width("33", TEXT_COLUMN_PX), hero_size_for_text("33"));
+}
+
 int main(void)
 {
     printf("hero sizing tests (spec 2.3/2.4, adapted for proportional face)\n\n");
@@ -213,6 +255,8 @@ int main(void)
     test_snaps_to_available_sizes();
     test_monotonic();
     test_unknown_glyphs();
+
+    test_size_for_width();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

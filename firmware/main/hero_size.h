@@ -42,3 +42,14 @@ _Bool text_fits(const char *text, int size_px);
  * (spec 6.1 abbreviates $6,512 to $6.5k for exactly this reason).
  */
 int hero_size_for_text(const char *text);
+
+/*
+ * As hero_size_for_text, but fitting `column_px` instead of the panel column.
+ *
+ * The card layout insets its text by CARD_PAD on both sides, so a hero inside
+ * a card has a narrower column than one drawn against the panel. Sizing every
+ * hero to the panel column put three of the five card screens over the card's
+ * edge, including one that ran past the card's outer boundary entirely. Pass
+ * the column the text will actually occupy.
+ */
+int hero_size_for_width(const char *text, int column_px);

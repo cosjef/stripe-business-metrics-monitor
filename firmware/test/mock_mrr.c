@@ -303,7 +303,7 @@ static void render_subs_flow(void)
     label_at(scr, "active", font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
              inner_x, CARD_Y + CARD_SUBTITLE_DY);
 
-    const int px = hero_size_for_text("33");
+    const int px = hero_size_for_width("33", card_w - 2 * CARD_PAD);
     label_at_baseline(scr, "33", font_for_size(px), COLOR_PRIMARY,
                       inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
 
@@ -413,7 +413,7 @@ static void render_subs_flow_left(void)
     label_at(scr, "active", font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
              inner_x, CARD_Y + CARD_SUBTITLE_DY);
 
-    const int px = hero_size_for_text("33");
+    const int px = hero_size_for_width("33", card_w - 2 * CARD_PAD);
     label_at_baseline(scr, "33", font_for_size(px), COLOR_PRIMARY,
                       inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
 
@@ -455,6 +455,197 @@ static void render_subs_flow_left(void)
     harness_dump_ppm("mock_subs_flow_left.ppm");
 }
 
+/*
+ * MRR card with ARR folded in as a footer line.
+ *
+ * ARR is mrr_cents * 12 -- a restatement in different units, carrying no
+ * information MRR does not. It does not earn a rotation slot on a deck whose
+ * discipline is one fact per screen. But it is the figure people quote, and
+ * "$13,276/yr" lands differently from "$1,106/mo" even though they are the
+ * same number, so it is shown next to the value it derives from rather than
+ * implied to be independent news.
+ *
+ * The line goes inside the card, under the caption, in the footer colour --
+ * quiet, and visibly subordinate to the hero. There is room: the caption sits
+ * 248px into a 300px card, leaving 52px, and a 26px footer needs about 34
+ * with its leading.
+ */
+static void render_mrr_with_arr(void)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    label_at(scr, "MRR", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    lv_obj_t *pill = lv_label_create(scr);
+    lv_label_set_text(pill, "+4.2%");
+    lv_obj_set_style_text_font(pill, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(pill, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_right(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_top(pill, PILL_PAD_Y, 0);
+    lv_obj_set_style_pad_bottom(pill, PILL_PAD_Y, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -PAD_PX, LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    label_at(scr, "33 active", font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
+             inner_x, CARD_Y + CARD_SUBTITLE_DY);
+
+    const int px = hero_size_for_width("$1,106.33", card_w - 2 * CARD_PAD);
+    label_at_baseline(scr, "$1,106.33", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
+
+    const int bar_w = card_w - 2 * CARD_PAD;
+    const int bar_y = CARD_Y + CARD_BAR_DY;
+
+    lv_obj_t *track = lv_obj_create(scr);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_pos(track, inner_x, bar_y);
+    lv_obj_set_size(track, bar_w, CARD_BAR_H);
+    lv_obj_set_style_bg_color(track, lv_color_hex(COLOR_TRACK), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(track, LV_RADIUS_CIRCLE, 0);
+
+    lv_obj_t *fill = lv_obj_create(scr);
+    lv_obj_remove_style_all(fill);
+    lv_obj_set_pos(fill, inner_x, bar_y);
+    lv_obj_set_size(fill, (bar_w * 78) / 100, CARD_BAR_H);
+    lv_obj_set_style_bg_color(fill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(fill, LV_RADIUS_CIRCLE, 0);
+
+    label_at(scr, "vs $1,061 last month", font_for_size(SIZE_FOOTER),
+             COLOR_DIM, inner_x, CARD_Y + CARD_CAPTION_DY);
+
+    /* The ARR line: dim, inside the card, clearly subordinate. */
+    label_at(scr, "$13,276 / yr", font_for_size(SIZE_FOOTER),
+             COLOR_DIM, inner_x, CARD_Y + CARD_CAPTION_DY + 34);
+
+    dots(scr, 0, 4);
+
+    harness_render();
+    harness_dump_ppm("mock_mrr_arr.ppm");
+}
+
+/* The ARR screen as it stands today, for comparison. */
+static void render_arr_screen(void)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    label_at(scr, "ANNUAL RUN RATE", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    const int px = hero_size_for_text("$13,276");
+    label_at_baseline(scr, "$13,276", font_for_size(px), COLOR_PRIMARY,
+                      PAD_PX, HERO_BASELINE_Y);
+
+    label_at_baseline(scr, "at current MRR", font_for_size(SIZE_SUBTITLE),
+                      COLOR_MUTED, PAD_PX, SUBTITLE_BASELINE_Y);
+
+    dots(scr, 3, 5);
+
+    harness_render();
+    harness_dump_ppm("mock_arr_screen.ppm");
+}
+
+/*
+ * ARR with the card treatment and a trend.
+ *
+ * Worth being honest about what this can and cannot be: ARR is mrr_cents * 12,
+ * so its percentage change is IDENTICAL to MRR's -- the twelve cancels. The
+ * delta pill therefore reads the same on both screens by arithmetic, not by
+ * coincidence, and no amount of layout can make it independent news.
+ *
+ * What it can legitimately add is scale framing: the annual figure is the one
+ * people quote, and the year-over-year money amount ("+$536/yr") is a
+ * different-feeling quantity from "+4.2%" even though it is the same fact.
+ */
+static void render_arr_card(void)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+
+    label_at(scr, "ANNUAL RUN RATE", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    lv_obj_t *pill = lv_label_create(scr);
+    lv_label_set_text(pill, "+4.2%");
+    lv_obj_set_style_text_font(pill, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(pill, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_right(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_top(pill, PILL_PAD_Y, 0);
+    lv_obj_set_style_pad_bottom(pill, PILL_PAD_Y, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -PAD_PX, LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    label_at(scr, "at current MRR", font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
+             inner_x, CARD_Y + CARD_SUBTITLE_DY);
+
+    const int px = hero_size_for_width("$13,276", card_w - 2 * CARD_PAD);
+    label_at_baseline(scr, "$13,276", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
+
+    const int bar_w = card_w - 2 * CARD_PAD;
+    const int bar_y = CARD_Y + CARD_BAR_DY;
+
+    lv_obj_t *track = lv_obj_create(scr);
+    lv_obj_remove_style_all(track);
+    lv_obj_set_pos(track, inner_x, bar_y);
+    lv_obj_set_size(track, bar_w, CARD_BAR_H);
+    lv_obj_set_style_bg_color(track, lv_color_hex(COLOR_TRACK), 0);
+    lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(track, LV_RADIUS_CIRCLE, 0);
+
+    lv_obj_t *fill = lv_obj_create(scr);
+    lv_obj_remove_style_all(fill);
+    lv_obj_set_pos(fill, inner_x, bar_y);
+    lv_obj_set_size(fill, (bar_w * 78) / 100, CARD_BAR_H);
+    lv_obj_set_style_bg_color(fill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(fill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(fill, LV_RADIUS_CIRCLE, 0);
+
+    /* The annual money amount, which is the one thing here that MRR's card
+     * does not already say in the same units. */
+    label_at(scr, "+$536 vs last month", font_for_size(SIZE_FOOTER),
+             COLOR_DIM, inner_x, CARD_Y + CARD_CAPTION_DY);
+
+    dots(scr, 3, 5);
+
+    harness_render();
+    harness_dump_ppm("mock_arr_card.ppm");
+}
+
 int main(void)
 {
     harness_init();
@@ -465,6 +656,9 @@ int main(void)
     render_subs();
     render_subs_flow();
     render_subs_flow_left();
+    render_mrr_with_arr();
+    render_arr_screen();
+    render_arr_card();
     printf("wrote mock_current/option_b/collecting .ppm at %dx%d\n",
            HARNESS_W, HARNESS_H);
     return 0;

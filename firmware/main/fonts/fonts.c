@@ -27,7 +27,9 @@ const lv_font_t *font_for_size(int size_px)
     case 88: return &stripe_sans_88;
     case 92: return &stripe_sans_92;
     case 96: return &stripe_sans_96;
+    case 104: return &stripe_sans_104;
     case 108: return &stripe_sans_108;
+    case 120: return &stripe_sans_120;
     case 126: return &stripe_sans_126;
     case 137: return &stripe_sans_137;
     default: break;
