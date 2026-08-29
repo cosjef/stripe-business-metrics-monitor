@@ -80,6 +80,15 @@ bool history_has_trend(const history_t *h);
  */
 int64_t history_value_at(const history_t *h, int i);
 
+/*
+ * Epoch day of the newest sample, or -1 when empty.
+ *
+ * Lets a caller that has just restored a series tell whether today is already
+ * recorded, without reaching into the ring itself -- the head/count indexing
+ * is this module's business.
+ */
+int32_t history_latest_day(const history_t *h);
+
 /* Newest and oldest values held. Zero if empty. */
 int64_t history_latest(const history_t *h);
 int64_t history_oldest(const history_t *h);

@@ -68,6 +68,16 @@ int64_t history_value_at(const history_t *h, int i)
     return h->value[idx_of(h, i)];
 }
 
+int32_t history_latest_day(const history_t *h)
+{
+    if (h->count <= 0) {
+        return -1;
+    }
+    /* head is where the next write goes, so the newest sample is behind it. */
+    const int newest = (h->head - 1 + HISTORY_DAYS) % HISTORY_DAYS;
+    return h->day[newest];
+}
+
 int64_t history_latest(const history_t *h)
 {
     if (h->count == 0) {

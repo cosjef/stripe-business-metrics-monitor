@@ -37,6 +37,7 @@
 
 extern "C" {
 #include "format.h"
+#include "history.h"
 #include "provision.h"
 #include "rotation.h"
 #include "screens.h"
@@ -45,6 +46,23 @@ extern "C" {
 #include "layout.h"
 
 #define FIRMWARE_VERSION "v0.4.0"
+
+/*
+ * Timezone, as a POSIX TZ string.
+ *
+ * The daily history buckets by LOCAL day, because "today's MRR" has to mean
+ * the day the owner is living in, not UTC. configTzTime hands the rule to
+ * newlib so DST is handled by the C library rather than by arithmetic here --
+ * the ESP-IDF build derived the offset by hand and needed a correction for
+ * the two calendars landing on different days, which is exactly the kind of
+ * code that is wrong twice a year.
+ */
+#define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
+#define NTP_SERVER_1 "pool.ntp.org"
+#define NTP_SERVER_2 "time.nist.gov"
+
+/* Clocks before this are unset, not merely wrong: 2023-01-01. */
+#define CLOCK_SANE_EPOCH 1672531200
 
 #define ROTATE_MS  5000
 #define REFRESH_MS (5 * 60 * 1000)   /* spec 7.1: poll every five minutes */
@@ -104,6 +122,22 @@ static char s_key[STRIPE_KEY_MAX_LEN + 1];
 static bool s_have_data;
 static uint32_t s_last_refresh;
 
+/*
+ * The MRR series behind the card's delta.
+ *
+ * Loaded from NVS at boot so a reboot does not restart the seven-day wait
+ * before a trend can honestly be drawn, and saved only when the day rolls
+ * over -- NVS is flash, and a five-minute poll would be thousands of writes a
+ * month for a value that changes once a day.
+ */
+static history_t s_history;
+static int32_t s_history_day = -1;   /* last epoch day recorded */
+static bool s_clock_ok;
+
+/* Defined below with the rest of the time handling; used by apply_totals. */
+static void record_history(int64_t mrr_cents);
+static void update_delta(int64_t mrr_cents);
+
 /* ---- hardware ---- */
 
 static bool power_up(void)
@@ -154,6 +188,76 @@ static void draw_setup_screen(const char *line1)
                       "on your phone", FIRMWARE_VERSION);
 }
 
+/*
+ * Delta strings for the card, rebuilt after each fetch.
+ *
+ * Held in static buffers because card_data_t borrows its strings; they must
+ * outlive the draw call.
+ */
+static char s_delta[16];
+static char s_comparison[FIELD_LEN];
+static bool s_has_delta;
+static bool s_delta_is_gain;
+static int s_fill_pct;
+
+/*
+ * Turn the series into the card's trend, or decline to.
+ *
+ * history_has_trend() is the gate: under seven samples there is no honest
+ * direction to report, and the card renders its collecting state instead. Two
+ * points make a straight line, which would assert a trend nobody measured.
+ */
+static void update_delta(int64_t mrr_cents)
+{
+    if (!history_has_trend(&s_history)) {
+        s_has_delta = false;
+        const int n = history_count(&s_history);
+        snprintf(s_comparison, sizeof(s_comparison),
+                 "collecting history (%d/%d)", n, HISTORY_MIN_FOR_TREND);
+        return;
+    }
+
+    const int64_t oldest = history_oldest(&s_history);
+    if (oldest <= 0) {
+        /* Percentage against zero is undefined, not infinite. */
+        s_has_delta = false;
+        snprintf(s_comparison, sizeof(s_comparison), "no baseline");
+        return;
+    }
+
+    const int64_t change = history_change(&s_history);
+
+    /* Integer maths in tenths of a percent, so the money path stays free of
+     * floating point like the rest of the device. */
+    const int64_t tenths = (change * 1000) / oldest;
+    snprintf(s_delta, sizeof(s_delta), "%s%lld.%d%%",
+             tenths >= 0 ? "+" : "-",
+             (long long)(tenths < 0 ? -tenths : tenths) / 10,
+             (int)((tenths < 0 ? -tenths : tenths) % 10));
+
+    char baseline[24];
+    format_money_compact(oldest, baseline, sizeof(baseline));
+    snprintf(s_comparison, sizeof(s_comparison), "vs %s %d days ago",
+             baseline, history_day_span(&s_history));
+
+    s_delta_is_gain = change >= 0;
+
+    /*
+     * Bar fill: where the current value sits between the window's low and
+     * high. A bar showing "percent of the maximum" would sit near full
+     * forever and say nothing; against the range it actually moves.
+     */
+    const int64_t lo = history_min(&s_history);
+    const int64_t hi = history_max(&s_history);
+    if (hi > lo) {
+        s_fill_pct = (int)(((mrr_cents - lo) * 100) / (hi - lo));
+    } else {
+        s_fill_pct = 100;   /* flat series: full rather than empty */
+    }
+
+    s_has_delta = true;
+}
+
 /* `slot` indexes the visible list, not screen_id_t. */
 static void show(int slot)
 {
@@ -164,6 +268,28 @@ static void show(int slot)
         slot = 0;
     }
     const screen_id_t id = s_visible[slot];
+
+    /*
+     * MRR gets the card, because it is the only screen with a series behind
+     * it. The others keep the rotation layout until they have their own
+     * history to show -- a card with a permanently empty bar would be worse
+     * than no card.
+     */
+    if (id == SCREEN_MRR) {
+        card_data_t c = {};
+        c.label = s_labels[id];
+        c.hero = s_values[id].hero;
+        c.subtitle = s_values[id].subtitle;
+        c.has_delta = s_has_delta;
+        c.delta = s_delta;
+        c.comparison = s_comparison;
+        c.delta_is_gain = s_delta_is_gain;
+        c.fill_pct = s_fill_pct;
+        c.dot_index = slot;
+        c.dot_count = s_visible_count;
+        screen_draw_card(lv_screen_active(), &c);
+        return;
+    }
 
     screen_data_t d = {};
     d.label = s_labels[id];
@@ -230,6 +356,97 @@ static void apply_totals(const mrr_totals_t *t)
     s_rot_state.have_data = true;
     s_rot_state.trial_count = t->trial_count;
     rebuild_rotation();
+
+    record_history(t->mrr_cents);
+    update_delta(t->mrr_cents);
+}
+
+/* ---- time and history ---- */
+
+/*
+ * Local epoch day, or -1 if the clock is not set.
+ *
+ * Returning -1 rather than a guess is the point: without NTP the clock starts
+ * at 1970 and every sample would land on the same fictional day, quietly
+ * corrupting the series with values recorded against a date that never
+ * happened.
+ */
+static int32_t local_epoch_day(void)
+{
+    const time_t now = time(NULL);
+    if (now < CLOCK_SANE_EPOCH) {
+        return -1;
+    }
+
+    struct tm local;
+    localtime_r(&now, &local);
+
+    /* mktime on a midnight-normalised copy gives the local day's start in
+     * epoch seconds, which divided by a day is the local day number. */
+    struct tm midnight = local;
+    midnight.tm_hour = 0;
+    midnight.tm_min = 0;
+    midnight.tm_sec = 0;
+    midnight.tm_isdst = -1;
+
+    const time_t day_start = mktime(&midnight);
+    if (day_start <= 0) {
+        return -1;
+    }
+    return (int32_t)(day_start / 86400);
+}
+
+static void sync_clock(void)
+{
+    configTzTime(DEVICE_TZ, NTP_SERVER_1, NTP_SERVER_2);
+
+    /* Wait briefly. A device that cannot reach NTP still runs -- it just
+     * cannot bucket history yet, and says so rather than inventing days. */
+    for (int i = 0; i < 100; i++) {
+        if (time(NULL) >= CLOCK_SANE_EPOCH) {
+            s_clock_ok = true;
+            break;
+        }
+        delay(100);
+        lv_timer_handler();
+    }
+
+    if (s_clock_ok) {
+        char buf[32];
+        const time_t now = time(NULL);
+        struct tm local;
+        localtime_r(&now, &local);
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &local);
+        Serial.printf("clock: %s local\n", buf);
+    } else {
+        Serial.println("clock: NTP did not sync; history paused");
+    }
+}
+
+/*
+ * Fold today's MRR into the series.
+ *
+ * history_record already updates rather than appends within a day, so calling
+ * this on every fetch is safe. The NVS write is what needs rationing, so it
+ * happens only when the day actually changes.
+ */
+static void record_history(int64_t mrr_cents)
+{
+    const int32_t day = local_epoch_day();
+    if (day < 0) {
+        return;             /* no clock: record nothing rather than a guess */
+    }
+
+    const bool day_changed = (day != s_history_day);
+    history_record(&s_history, day, mrr_cents);
+    s_history_day = day;
+
+    if (day_changed) {
+        if (settings_save_history(&s_history, sizeof(s_history))) {
+            Serial.printf("history: %d sample(s) saved\n",
+                          history_count(&s_history));
+        }
+    }
 }
 
 /* ---- network ---- */
@@ -413,6 +630,29 @@ void setup(void)
         Serial.println("WARN: settings unavailable; setup cannot persist");
     }
 
+    /*
+     * Restore the series before anything can record into it.
+     *
+     * A failed or absent load leaves it zeroed by history_init, which is the
+     * correct fresh-device state -- no samples, no trend, and the card says
+     * it is collecting.
+     */
+    history_init(&s_history);
+    if (settings_load_history(&s_history, sizeof(s_history))) {
+        Serial.printf("history: restored %d sample(s)\n",
+                      history_count(&s_history));
+    }
+    /*
+     * Seed the day from the restored series, not from -1.
+     *
+     * s_history_day drives the "did the day roll over?" test that rations NVS
+     * writes. Left at -1 it reads as a day change on the first fetch after
+     * every boot, so a device power-cycled a few times a day would write
+     * flash each time for a sample already stored.
+     */
+    s_history_day = history_latest_day(&s_history);
+    update_delta(0);
+
     /* Decide the mode from what is actually stored. */
     char ssid[SETTINGS_SSID_LEN];
     char pass[SETTINGS_PASS_LEN];
@@ -444,6 +684,9 @@ void setup(void)
         start_portal(true);
         return;
     }
+
+    /* Clock before the first fetch, so that fetch can be bucketed. */
+    sync_clock();
 
     stripe_fetch_set_key(s_key);
     s_mode = MODE_RUNNING;
@@ -499,6 +742,10 @@ static void service_mode_change(void)
             start_portal(false);
         }
     } else if (s_mode == MODE_RUNNING) {
+        /* Provisioned just now: the clock has not been synced this boot. */
+        if (!s_clock_ok) {
+            sync_clock();
+        }
         /*
          * Leave the AP up briefly after a successful key.
          *

@@ -247,6 +247,40 @@ static void test_change_over_window(void)
     check_i64("one sample means no change", history_change(&one), 0);
 }
 
+/*
+ * history_latest_day exists so a caller restoring a series from flash can ask
+ * "is today already recorded?" without indexing the ring itself. The ring
+ * wrap is the part worth testing: after HISTORY_DAYS samples the newest is at
+ * head-1, not at count-1.
+ */
+static void test_latest_day(void)
+{
+    history_t h;
+    history_init(&h);
+
+    check_i64("empty series has no latest day", history_latest_day(&h), -1);
+
+    history_record(&h, D0, 100000);
+    check_i64("one sample reports its day", history_latest_day(&h), D0);
+
+    history_record(&h, D0 + 1, 101000);
+    check_i64("newest day after two", history_latest_day(&h), D0 + 1);
+
+    /* Same day again updates rather than appends, so the day is unchanged. */
+    history_record(&h, D0 + 1, 102000);
+    check_i64("same-day update keeps the day", history_latest_day(&h), D0 + 1);
+
+    /* Fill past capacity so head wraps, then confirm it still reports the
+     * newest rather than whatever sits at the physical end of the array. */
+    history_t w;
+    history_init(&w);
+    for (int i = 0; i < HISTORY_DAYS + 5; i++) {
+        history_record(&w, D0 + i, 100000 + i);
+    }
+    check_i64("after wrap, newest day is the last written",
+              history_latest_day(&w), D0 + HISTORY_DAYS + 4);
+}
+
 int main(void)
 {
     test_starts_empty();
@@ -257,6 +291,7 @@ int main(void)
     test_trend_needs_enough_points();
     test_range_for_scaling();
     test_change_over_window();
+    test_latest_day();
 
     printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
