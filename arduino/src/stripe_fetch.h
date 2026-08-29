@@ -1,0 +1,39 @@
+/*
+ * Stripe fetch for the Arduino port.
+ *
+ * Wraps the shared streaming scanner (firmware/main/jsonstream.c) in
+ * NetworkClientSecure, so the response is folded into a running total as its
+ * bytes arrive and never assembled.
+ */
+#pragma once
+
+#include <stdbool.h>
+
+extern "C" {
+#include "mrr.h"
+}
+
+typedef enum {
+    STRIPE_FETCH_OK = 0,
+    STRIPE_FETCH_NO_KEY,
+    STRIPE_FETCH_NO_NETWORK,
+    STRIPE_FETCH_TLS_FAILED,
+    STRIPE_FETCH_UNAUTHORIZED,   /* 401: key revoked or wrong scope */
+    STRIPE_FETCH_HTTP_ERROR,
+    STRIPE_FETCH_BAD_RESPONSE,
+} stripe_fetch_result_t;
+
+/* Set the secret key. Borrowed, not copied -- must outlive the fetches. */
+void stripe_fetch_set_key(const char *key);
+
+/*
+ * Fetch every subscription and fold it into `out`.
+ *
+ * Paginates with starting_after until has_more is false. `truncated` is set
+ * when the page cap was hit, so the caller can mark the figure incomplete
+ * rather than presenting a partial total as final.
+ */
+stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated);
+
+/* Human-readable name for a result, for logging. */
+const char *stripe_fetch_strerror(stripe_fetch_result_t r);

@@ -7,6 +7,23 @@
  * mbedTLS holds its session, so buffer-then-parse fails at any page size: at
  * ~6KB per subscription it forces one per request and forty-plus round trips.
  *
+ * THAT ~15KB FIGURE IS ESP-IDF's, AND DOES NOT HOLD ON THE ARDUINO BUILD.
+ * Measured on the C6 under Arduino with WiFi up and a live TLS session to
+ * api.stripe.com: 155KB free, largest contiguous block 131,060 bytes, and a
+ * 36KB buffer-then-parse allocation succeeds. So on that runtime this parser
+ * is NOT the difference between working and not working.
+ *
+ * It is kept anyway, for reasons that survive the measurement:
+ *   - it is O(1) in account size, where buffering is not. A 36KB buffer holds
+ *     ~30 subscriptions at the measured ~1.2KB each; the device should not
+ *     stop working when an account crosses a threshold nobody is watching.
+ *   - it is already written and already tested, and removing it would mean
+ *     new buffer-management code and new tests to replace passing ones.
+ *   - the 131KB was measured before the captive portal and its sockets exist.
+ *
+ * Do not re-derive the old justification from the paragraph above without
+ * re-measuring; on Arduino, buffering is now a viable fallback.
+ *
  * Nothing requires reassembling the body. esp_http_client already delivers it
  * in chunks; concatenating them was inherited from the S3. This folds each
  * subscription into a running total as its bytes arrive and then forgets it,

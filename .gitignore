@@ -40,3 +40,7 @@ firmware/test/test_cache
 
 # PlatformIO build output and fetched libraries (arduino/ port)
 arduino/.pio/
+
+# Bench credentials for the Arduino port: WiFi and the Stripe key.
+# Read at build time by arduino/secrets.py. Never commit.
+arduino/secrets.ini
