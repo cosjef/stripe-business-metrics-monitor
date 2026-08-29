@@ -13,6 +13,7 @@
 #include <Arduino.h>
 #include <NetworkClientSecure.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 
 extern "C" {
 #include "jsonstream.h"
@@ -37,11 +38,21 @@ extern "C" {
 /* A response that stops arriving should fail, not hang the rotation. */
 #define READ_TIMEOUT_MS 6000
 
-static const char *s_key = "";
+/*
+ * The key is COPIED, not borrowed.
+ *
+ * An earlier version stored the caller's pointer. The portal validates a key
+ * straight from the HTTP request handler, where the string is a temporary
+ * that is freed the moment the response is sent -- so validation succeeded,
+ * the key was saved to NVS, and every fetch afterwards read freed memory and
+ * reported "no key". The device would have needed a reboot to work at all,
+ * immediately after the one moment the owner was watching it.
+ */
+static char s_key[STRIPE_KEY_BUF_LEN];
 
 void stripe_fetch_set_key(const char *key)
 {
-    s_key = key ? key : "";
+    snprintf(s_key, sizeof(s_key), "%s", key ? key : "");
 }
 
 const char *stripe_fetch_strerror(stripe_fetch_result_t r)
@@ -73,7 +84,6 @@ static int read_status_and_headers(NetworkClientSecure &client)
         Serial.println("stripe: empty status line (connected but no response)");
         return -1;
     }
-    Serial.printf("stripe: status line: %s\n", status.c_str());
     /* "HTTP/1.1 200 OK" -- the code is the second field. */
     const int sp = status.indexOf(' ');
     if (sp < 0) {
@@ -102,7 +112,10 @@ static int fetch_page(NetworkClientSecure &client, jsonstream_t *js,
     if (!client.connect(STRIPE_HOST, STRIPE_PORT)) {
         char err[128] = "";
         client.lastError(err, sizeof(err));
-        Serial.printf("stripe: connect failed: %s\n", err[0] ? err : "(none)");
+        Serial.printf("stripe: connect failed: %s (heap free=%u largest=%u)\n",
+                      err[0] ? err : "(none)",
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         return -1;
     }
 
@@ -124,13 +137,11 @@ static int fetch_page(NetworkClientSecure &client, jsonstream_t *js,
     client.print("Connection: close\r\n");
     client.print("Accept: application/json\r\n\r\n");
 
-    Serial.println("stripe: TLS up, request sent");
     const int status = read_status_and_headers(client);
     if (status < 0) {
         client.stop();
         return -1;
     }
-    Serial.printf("stripe: HTTP status %d\n", status);
 
     /*
      * Stream the body. Even on an error status the body is drained through

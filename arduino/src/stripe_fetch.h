@@ -23,7 +23,13 @@ typedef enum {
     STRIPE_FETCH_BAD_RESPONSE,
 } stripe_fetch_result_t;
 
-/* Set the secret key. Borrowed, not copied -- must outlive the fetches. */
+/* Stripe keys are at most 255 characters; the buffer holds one plus a NUL. */
+#define STRIPE_KEY_BUF_LEN 256
+
+/*
+ * Set the secret key. The string is COPIED, so the caller may free it
+ * immediately -- the portal passes a request-scoped temporary.
+ */
 void stripe_fetch_set_key(const char *key);
 
 /*
