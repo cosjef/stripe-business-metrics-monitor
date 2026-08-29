@@ -31,7 +31,7 @@ for the design specification this is built from.
 Waveshare ESP32-S3-LCD-1.54 (non-touch): ESP32-S3R8, 8MB PSRAM, 16MB flash,
 ST7789 240x240 IPS panel over SPI at 40MHz.
 
-Pin assignments are in [firmware/main/board_config.h](firmware/main/board_config.h),
+Pin assignments are in [firmware-s3/main/board_config.h](firmware-s3/main/board_config.h),
 taken from Waveshare's own ESP-IDF example for this board.
 
 ## Building
@@ -52,7 +52,7 @@ Sizing and layout logic is pure arithmetic with no ESP-IDF dependency, so it
 runs on the host:
 
 ```sh
-cd firmware/test
+cd core/test
 make
 ```
 
@@ -70,7 +70,7 @@ covered — it needs real hardware.
 
 ## Regenerating fonts
 
-The LVGL bitmap fonts in `firmware/main/fonts/` are generated from the vendored
+The LVGL bitmap fonts in `core/fonts/` are generated from the vendored
 Roboto Condensed TTF. Regenerate them with:
 
 ```sh
