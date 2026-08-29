@@ -504,6 +504,76 @@ static void test_flow_revenue_byte_at_a_time(void)
     check_i64("same lost", t->churned_cents, 3000);
 }
 
+/*
+ * Signups in the period BEFORE the window, for pace comparison.
+ *
+ * A signup count answers "how many" but not "is this speeding up or slowing
+ * down", which is the question it always raises. That needs the previous
+ * period counted too: ten this month against six last is a different fact
+ * from ten against fourteen.
+ *
+ * The prior window is [window_start - span, window_start), so the two periods
+ * are the same length and adjacent -- comparing a 30-day window against a
+ * 45-day one would flatter or punish the current period for no reason.
+ */
+static const char *PACE_PAGE =
+    "{\"object\":\"list\",\"has_more\":false,\"data\":["
+    /* inside the current window */
+    "{\"id\":\"a\",\"status\":\"active\",\"created\":1755000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":1000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* inside the PRIOR window: created before window_start but within one
+     * span of it */
+    "{\"id\":\"b\",\"status\":\"active\",\"created\":1752000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":2000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}},"
+    /* older than both windows */
+    "{\"id\":\"c\",\"status\":\"active\",\"created\":1700000000,"
+    "\"items\":{\"data\":[{\"quantity\":1,\"price\":{\"unit_amount\":3000,"
+    "\"currency\":\"usd\",\"recurring\":{\"interval\":\"month\","
+    "\"interval_count\":1}}}]}}"
+    "]}";
+
+static void test_prior_window(void)
+{
+    printf("signups in the previous period\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    /* Window start chosen so "a" is inside it and "b" is one span before. */
+    jsonstream_set_window(&js, 1754000000);
+    jsonstream_set_span(&js, 30 * 86400);
+    jsonstream_feed(&js, PACE_PAGE, strlen(PACE_PAGE));
+    jsonstream_finish(&js);
+
+    const mrr_totals_t *t = jsonstream_totals(&js);
+
+    check_int("one signup in the current window", t->new_count, 1);
+    check_int("one signup in the prior window", t->prior_new_count, 1);
+    check_int("all three still active", t->active_count, 3);
+}
+
+/* Without a span there is no prior window, so the count stays zero rather
+ * than counting everything older as "last period". */
+static void test_prior_window_needs_span(void)
+{
+    printf("no span means no prior count\n");
+
+    jsonstream_t js;
+    jsonstream_init(&js);
+    jsonstream_set_window(&js, 1754000000);
+    /* deliberately no jsonstream_set_span */
+    jsonstream_feed(&js, PACE_PAGE, strlen(PACE_PAGE));
+    jsonstream_finish(&js);
+
+    check_int("current window still counted",
+              jsonstream_totals(&js)->new_count, 1);
+    check_int("prior window not counted",
+              jsonstream_totals(&js)->prior_new_count, 0);
+}
+
 int main(void)
 {
     test_single_chunk();
@@ -519,6 +589,8 @@ int main(void)
     test_flow_without_window();
     test_flow_revenue();
     test_flow_revenue_byte_at_a_time();
+    test_prior_window();
+    test_prior_window_needs_span();
     test_at_risk();
     test_at_risk_byte_at_a_time();
     test_no_one_at_risk();

@@ -213,6 +213,9 @@ static int s_arr_fill_pct;
 
 /* NEW PAID and NET 30D: revenue flow, not just head count. */
 static char s_new_hero[24], s_new_sub[FIELD_LEN], s_new_caption[FIELD_LEN];
+static char s_new_pill[16], s_new_top[32], s_new_bottom[32];
+static bool s_new_has_pace, s_new_is_gain;
+static int s_new_this, s_new_prev;
 static char s_net_hero[24], s_net_sub[FIELD_LEN], s_net_caption[FIELD_LEN];
 static char s_net_pill[16];
 static bool s_net_is_gain;
@@ -352,7 +355,17 @@ static void show(int slot)
         c.label = s_labels[id];
         c.hero = s_new_hero;
         c.subtitle = s_new_sub;
-        c.comparison = s_new_caption;
+        c.has_mix = s_new_has_pace;
+        if (s_new_has_pace) {
+            c.delta = s_new_pill;
+            c.delta_is_gain = s_new_is_gain;
+            c.mix_top = s_new_this;
+            c.mix_bottom = s_new_prev;
+            c.mix_top_label = s_new_top;
+            c.mix_bottom_label = s_new_bottom;
+        } else {
+            c.comparison = s_new_caption;
+        }
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -551,6 +564,41 @@ static void apply_totals(const mrr_totals_t *t)
         char amt[24];
         format_money_compact(t->new_cents, amt, sizeof(amt));
         snprintf(s_new_sub, sizeof(s_new_sub), "%s/mo added", amt);
+
+        /*
+         * Pace against the previous period.
+         *
+         * A count alone does not say whether acquisition is speeding up. Ten
+         * this month against six last is the fact worth having, and it reuses
+         * the two-bar comparison the ARPU card already established.
+         *
+         * The raw counts stay in the labels so the percentage never stands
+         * alone: at these volumes "+67%" is four customers, and a reader who
+         * cannot see the 10 and the 6 has no way to judge that.
+         */
+        s_new_has_pace = (t->new_count > 0 || t->prior_new_count > 0);
+        s_new_this = t->new_count;
+        s_new_prev = t->prior_new_count;
+
+        if (s_new_has_pace) {
+            snprintf(s_new_top, sizeof(s_new_top), "this month  %d",
+                     t->new_count);
+            snprintf(s_new_bottom, sizeof(s_new_bottom), "last month  %d",
+                     t->prior_new_count);
+
+            /*
+             * The pill carries the MONEY, not the percentage.
+             *
+             * The two bars already show 10 against 6, so a "+67%" pill would
+             * state what the bars state. The revenue those signups carried is
+             * the fact that would otherwise be lost: the mix variant hides
+             * the subtitle, which is where "$354/mo added" used to live, and
+             * ten signups at $13 is a very different month from ten at $49.
+             */
+            format_money_compact(t->new_cents, s_new_pill,
+                                 sizeof(s_new_pill));
+            s_new_is_gain = (t->new_count >= t->prior_new_count);
+        }
         snprintf(s_new_caption, sizeof(s_new_caption), "last 30 days");
     }
 
@@ -826,6 +874,8 @@ static void refresh(void)
     Serial.printf("flow money: +%lld / -%lld cents, net %+lld\n",
                   (long long)totals.new_cents, (long long)totals.churned_cents,
                   (long long)(totals.new_cents - totals.churned_cents));
+    Serial.printf("new paid pace: this=%d prior=%d\n",
+                  totals.new_count, totals.prior_new_count);
     Serial.printf("arpu mix: comparable=%d joining=%lld leaving=%lld\n",
                   (int)mrr_mix_comparable(totals.new_count, totals.churned_count),
                   (long long)mrr_arpu_cents(totals.new_cents, totals.new_count),

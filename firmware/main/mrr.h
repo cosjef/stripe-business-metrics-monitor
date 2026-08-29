@@ -82,6 +82,15 @@ typedef struct {
     int64_t churned_cents;
 
     /*
+     * Signups in the period immediately before the window, for pace.
+     *
+     * "Ten this month" does not say whether acquisition is speeding up or
+     * slowing down, which is the question a signup count always raises. Zero
+     * unless a span was set -- see jsonstream_set_span.
+     */
+    int prior_new_count;
+
+    /*
      * Subscriptions that have given notice but have not left.
      *
      * These are still active and still counted in mrr_cents -- the money is

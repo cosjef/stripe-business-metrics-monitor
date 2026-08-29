@@ -211,6 +211,8 @@ stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
         const time_t now = time(NULL);
         if (now > 1672531200) {          /* 2023-01-01: clock is real */
             jsonstream_set_window(js, (int64_t)now - 30 * 86400);
+            /* Same length again, immediately before, for the pace comparison. */
+            jsonstream_set_span(js, 30 * 86400);
         }
     }
 

@@ -89,6 +89,8 @@ typedef struct {
 
     /* Flow window, Unix seconds. 0 means no window and no flow counting. */
     int64_t window_start;
+    /* Window length, for the prior-period comparison. 0 means no comparison. */
+    int64_t window_span;
 } jsonstream_t;
 
 void jsonstream_init(jsonstream_t *js);
@@ -103,6 +105,16 @@ void jsonstream_init(jsonstream_t *js);
  * nothing. Call after jsonstream_init and before feeding.
  */
 void jsonstream_set_window(jsonstream_t *js, int64_t window_start);
+
+/*
+ * Set the window's length, enabling the prior-period signup count.
+ *
+ * The prior window is [window_start - span, window_start): the same length as
+ * the current one and immediately before it, so the two are comparable.
+ * Optional; without it prior_new_count stays zero rather than counting every
+ * older subscription as "last period".
+ */
+void jsonstream_set_span(jsonstream_t *js, int64_t span_seconds);
 
 /* Feed one chunk. Safe to call with any split of the document. */
 void jsonstream_feed(jsonstream_t *js, const char *data, size_t len);

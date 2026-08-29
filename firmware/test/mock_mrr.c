@@ -778,7 +778,7 @@ static void render_arpu_paired(void)
     lv_obj_t *card = lv_obj_create(scr);
     lv_obj_remove_style_all(card);
     lv_obj_set_pos(card, PAD_PX, CARD_Y);
-    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_size(card, card_w, MIX_CARD_H);
     lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(card, CARD_RADIUS, 0);

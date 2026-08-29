@@ -313,7 +313,7 @@ static void build_card_objects(lv_obj_t *scr)
     s_card.card = lv_obj_create(scr);
     lv_obj_remove_style_all(s_card.card);
     lv_obj_set_pos(s_card.card, PAD_PX, CARD_Y);
-    lv_obj_set_size(s_card.card, card_w, CARD_H);
+    lv_obj_set_size(s_card.card, card_w, CARD_H);   /* resized per variant */
     lv_obj_set_style_bg_color(s_card.card, lv_color_hex(COLOR_CARD), 0);
     lv_obj_set_style_bg_opa(s_card.card, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(s_card.card, CARD_RADIUS, 0);
@@ -424,6 +424,10 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     const int card_w = PANEL_PX - 2 * PAD_PX;
     const int bar_w = card_w - 2 * CARD_PAD;
     const int inner_x = PAD_PX + CARD_PAD;
+
+    /* The mix variant needs a taller card for its two bar-and-label groups. */
+    lv_obj_set_size(s_card.card, card_w,
+                    data->has_mix ? MIX_CARD_H : CARD_H);
 
     lv_label_set_text(s_card.label, data->label);
 

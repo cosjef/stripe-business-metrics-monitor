@@ -143,6 +143,15 @@ static void finish_subscription(jsonstream_t *js)
              */
             js->totals.new_count++;
             js->totals.new_cents += worth;
+        } else if (js->window_span > 0 && js->cur_ended == 0 &&
+                   js->cur_created >= js->window_start - js->window_span &&
+                   js->cur_created < js->window_start) {
+            /*
+             * Signed up in the period before this one and still running.
+             * Counted for pace only -- it is not new, and its revenue is
+             * already inside mrr_cents like any other established customer.
+             */
+            js->totals.prior_new_count++;
         }
     }
 
@@ -259,6 +268,11 @@ static void apply_token(jsonstream_t *js)
 void jsonstream_set_window(jsonstream_t *js, int64_t window_start)
 {
     js->window_start = window_start;
+}
+
+void jsonstream_set_span(jsonstream_t *js, int64_t span_seconds)
+{
+    js->window_span = span_seconds;
 }
 
 void jsonstream_feed(jsonstream_t *js, const char *data, size_t len)

@@ -108,9 +108,20 @@
  * the card edge.
  */
 #define C6_MIX_HERO_BASELINE_DY (128)
-#define C6_MIX_ROW1_DY          (178)
-#define C6_MIX_ROW2_DY          (232)
-#define C6_MIX_LABEL_GAP        (8)    /* bar bottom to its label */
+
+/*
+ * The mix variant uses a taller card.
+ *
+ * Two bar-and-label groups need 56px each. At the standard 300px height the
+ * rows had to sit 58px apart, which put the first label 2px INTO the second
+ * bar -- they were not merely close, they overlapped. 320 buys 18px of clear
+ * separation between the groups while keeping the card clear of the dots at
+ * y=420.
+ */
+#define C6_MIX_CARD_H           (320)
+#define C6_MIX_ROW1_DY          (176)
+#define C6_MIX_ROW2_DY          (248)  /* 72px pitch: 56px group + 16 clear */
+#define C6_MIX_LABEL_GAP        (6)    /* bar bottom to its label */
 
 /* Delta pill, right-aligned on the label row. */
 #define C6_PILL_PAD_X           (16)
