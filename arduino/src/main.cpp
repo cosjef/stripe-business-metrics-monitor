@@ -38,6 +38,7 @@
 extern "C" {
 #include "format.h"
 #include "provision.h"
+#include "rotation.h"
 #include "screens.h"
 #include "stripe_key.h"
 }
@@ -62,23 +63,41 @@ static app_mode_t s_mode = MODE_SETUP_WIFI;
 
 #define FIELD_LEN 40
 
-typedef enum {
-    SCREEN_MRR = 0,
-    SCREEN_PAID_SUBS,
-    SCREEN_TRIALS,
-    SCREEN_ARR,
-    SCREEN_ARPU,
-    SCREEN_COUNT,
-} screen_id_t;
-
+/*
+ * screen_id_t and the visibility rules come from rotation.h, not from a local
+ * enum.
+ *
+ * The rules are the interesting part: an account with no trials should not
+ * spend a rotation slot on a permanent zero (spec 6.1). That logic already
+ * exists and is covered by test_rotation, so it is shared rather than
+ * reimplemented -- a second copy of "which screens are worth showing" is
+ * exactly the kind of thing that drifts silently between builds.
+ *
+ * Only the screens this port can currently fill are populated; the rest are
+ * held back by the rotation state below until their inputs exist.
+ */
 static struct {
     char hero[FIELD_LEN];
     char subtitle[FIELD_LEN];
 } s_values[SCREEN_COUNT];
 
 static const char *s_labels[SCREEN_COUNT] = {
-    "MRR", "PAID SUBS", "TRIALS", "ANNUAL RUN RATE", "ARPU",
+    [SCREEN_MRR]           = "MRR",
+    [SCREEN_NEW_PAID]      = "NEW PAID",
+    [SCREEN_PAID_SUBS]     = "PAID SUBS",
+    [SCREEN_TRIALS]        = "TRIALS",
+    [SCREEN_CONVERSION]    = "CONVERSION",
+    [SCREEN_CANCELLATIONS] = "CANCELLED",
+    [SCREEN_ARR]           = "ANNUAL RUN RATE",
+    [SCREEN_ARPU]          = "ARPU",
+    [SCREEN_NET_CHANGE]    = "NET 30D",
+    [SCREEN_FAILED]        = "FAILED",
 };
+
+/* Which screens are worth showing, rebuilt after every fetch. */
+static rotation_state_t s_rot_state;
+static screen_id_t s_visible[SCREEN_COUNT];
+static int s_visible_count = 1;
 
 static char s_setup_ssid[SETUP_SSID_LEN];
 static char s_key[STRIPE_KEY_MAX_LEN + 1];
@@ -135,16 +154,38 @@ static void draw_setup_screen(const char *line1)
                       "on your phone", FIRMWARE_VERSION);
 }
 
-static void show(int index)
+/* `slot` indexes the visible list, not screen_id_t. */
+static void show(int slot)
 {
+    if (s_visible_count <= 0) {
+        return;
+    }
+    if (slot < 0 || slot >= s_visible_count) {
+        slot = 0;
+    }
+    const screen_id_t id = s_visible[slot];
+
     screen_data_t d = {};
-    d.label = s_labels[index];
-    d.hero = s_values[index].hero;
-    d.subtitle = s_values[index].subtitle;
-    d.dot_index = index;
-    d.dot_count = SCREEN_COUNT;
+    d.label = s_labels[id];
+    d.hero = s_values[id].hero;
+    d.subtitle = s_values[id].subtitle;
+    d.dot_index = slot;
+    d.dot_count = s_visible_count;
 
     screen_draw_rotation(lv_screen_active(), &d);
+}
+
+static void rebuild_rotation(void)
+{
+    const int n = rotation_build(&s_rot_state, s_visible);
+    if (n <= 0) {
+        /* rotation_build guarantees MRR, but never leave the device with an
+         * empty deck -- a blank rotation reads as broken. */
+        s_visible[0] = SCREEN_MRR;
+        s_visible_count = 1;
+        return;
+    }
+    s_visible_count = n;
 }
 
 static void apply_totals(const mrr_totals_t *t)
@@ -175,6 +216,20 @@ static void apply_totals(const mrr_totals_t *t)
     }
 
     s_have_data = true;
+
+    /*
+     * Feed the visibility rules. trial_count is what keeps a TRIALS screen
+     * off the deck for an account that has none -- which is this account:
+     * 33 active, 0 trialing, so the screen was correctly reading zero and
+     * should simply not be shown.
+     *
+     * The screens this port cannot yet fill (conversion, cancellations, net
+     * change, failed payments) stay hidden because their inputs are still
+     * false/zero here, not because of a separate list.
+     */
+    s_rot_state.have_data = true;
+    s_rot_state.trial_count = t->trial_count;
+    rebuild_rotation();
 }
 
 /* ---- network ---- */

@@ -41,6 +41,6 @@ firmware/test/test_cache
 # PlatformIO build output and fetched libraries (arduino/ port)
 arduino/.pio/
 
-# Bench credentials for the Arduino port: WiFi and the Stripe key.
-# Read at build time by arduino/secrets.py. Never commit.
+# Bench credentials, if a secrets.ini is ever reintroduced. Credentials now
+# come from the captive portal into NVS, so this should stay unused.
 arduino/secrets.ini
