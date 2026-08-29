@@ -1,0 +1,80 @@
+/*
+ * Streaming JSON scanner for Stripe subscription pages.
+ *
+ * The device displays about 60 bytes of state and transfers ~180KB to compute
+ * it. On the S3 that ratio cost nothing, because 8MB of PSRAM held the whole
+ * response. The C6 has 512KB of SRAM and a ~15KB largest contiguous block once
+ * mbedTLS holds its session, so buffer-then-parse fails at any page size: at
+ * ~6KB per subscription it forces one per request and forty-plus round trips.
+ *
+ * Nothing requires reassembling the body. esp_http_client already delivers it
+ * in chunks; concatenating them was inherited from the S3. This folds each
+ * subscription into a running total as its bytes arrive and then forgets it,
+ * so the resident set is a few hundred bytes rather than the document.
+ *
+ * NOT a general JSON parser. It walks data[] and pulls the eight fields MRR
+ * needs, skipping everything else. That narrowness is deliberate: a general
+ * parser would need to represent arbitrary structure, which is the cost being
+ * avoided.
+ *
+ * No ESP-IDF, so it is host-tested -- and the tests feed every chunk size,
+ * because chunk boundaries are where hand-rolled streaming parsers break.
+ */
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+
+#include "mrr.h"
+
+/* Longest token we need to hold across a chunk boundary: a Stripe id. */
+#define JSONSTREAM_TOKEN_MAX 64
+
+/* Nesting we track. Stripe subscriptions reach about six levels. */
+#define JSONSTREAM_MAX_DEPTH 24
+
+typedef struct {
+    /* --- running results --- */
+    mrr_totals_t totals;
+    char last_id[JSONSTREAM_TOKEN_MAX];
+    bool has_more;
+
+    /* --- the subscription being assembled --- */
+    char cur_id[JSONSTREAM_TOKEN_MAX];
+    char cur_status[24];
+    char cur_currency[MRR_CURRENCY_LEN];
+    char cur_interval[12];
+    int64_t cur_unit_amount;
+    int64_t cur_quantity;
+    int32_t cur_interval_count;
+    int64_t cur_subtotal;      /* summed items for this subscription */
+    bool cur_tiered;
+    bool in_subscription;
+    bool item_has_price;
+
+    /* --- scanner state --- */
+    char token[JSONSTREAM_TOKEN_MAX];
+    int token_len;
+    char key[JSONSTREAM_TOKEN_MAX];
+    int key_len;
+    int depth;
+    bool in_string;
+    bool escaped;
+    bool expect_value;   /* the next token is a value, not a key */
+    bool in_data_array;
+    int data_depth;      /* depth at which data[] elements sit */
+    bool truncated;      /* a token was too long and was dropped */
+} jsonstream_t;
+
+void jsonstream_init(jsonstream_t *js);
+
+/* Feed one chunk. Safe to call with any split of the document. */
+void jsonstream_feed(jsonstream_t *js, const char *data, size_t len);
+
+/* Close out the final subscription, if the document ended mid-object. */
+void jsonstream_finish(jsonstream_t *js);
+
+const mrr_totals_t *jsonstream_totals(const jsonstream_t *js);
+const char *jsonstream_last_id(const jsonstream_t *js);
+bool jsonstream_has_more(const jsonstream_t *js);

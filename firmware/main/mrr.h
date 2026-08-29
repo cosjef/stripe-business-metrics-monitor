@@ -52,22 +52,10 @@ typedef struct {
     char currency[MRR_CURRENCY_LEN];
 } mrr_item_t;
 
-/*
- * A subscription's discount, from sub.discount.coupon.
- *
- * Stripe gives either percent_off or amount_off, never both.
- */
-typedef struct {
-    bool present;
-    int32_t percent_off_x100;   /* 50% -> 5000, so 33.33% is representable */
-    int64_t amount_off;         /* cents */
-} mrr_discount_t;
-
 typedef struct {
     bool trialing;              /* status == "trialing" */
     const mrr_item_t *items;
     int item_count;
-    mrr_discount_t discount;
 } mrr_subscription_t;
 
 typedef struct {
@@ -100,17 +88,11 @@ typedef struct {
 void mrr_totals_merge(mrr_totals_t *acc, const mrr_totals_t *page);
 
 /*
- * Monthly value of a single item, in cents, before any discount.
+ * Monthly value of a single item, in cents.
  * Returns 0 for non-recurring, tiered, or unknown-interval items.
  */
 int64_t mrr_item_monthly_cents(const mrr_item_t *item);
 
-/*
- * Apply a subscription-level discount to a monthly subtotal.
- * Never returns a negative value: a coupon larger than the subtotal zeroes it
- * rather than subtracting from the account total.
- */
-int64_t mrr_apply_discount(int64_t subtotal_cents, const mrr_discount_t *d);
 
 /* Compute totals across a set of subscriptions. */
 mrr_totals_t mrr_compute(const mrr_subscription_t *subs, int count);

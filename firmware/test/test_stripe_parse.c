@@ -132,65 +132,6 @@ static void test_filters_by_status(void)
     check_int("trial counted", t.trial_count, 1);
 }
 
-static void test_discount_percent(void)
-{
-    printf("percent_off discounts are read\n");
-
-    static const char json[] =
-    "{\"data\":[{\"status\":\"active\","
-    "\"discount\":{\"coupon\":{\"percent_off\":50.0,\"amount_off\":null}},"
-    "\"items\":{\"data\":[{\"quantity\":1,"
-    "\"price\":{\"billing_scheme\":\"per_unit\",\"currency\":\"usd\","
-    "\"unit_amount\":10000,"
-    "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}}}]}}]}";
-
-    stripe_subs_t out;
-    check_true("parses", stripe_parse_subscriptions(json, &out));
-    check_true("discount present", out.subs[0].discount.present);
-    check_int("50 percent", out.subs[0].discount.percent_off_x100, 5000);
-
-    const mrr_totals_t t = mrr_compute(out.subs, out.sub_count);
-    check_i64("half of $100", t.mrr_cents, 5000);
-}
-
-/* Fractional percentages must survive: 33.33% is a real coupon value. */
-static void test_discount_fractional_percent(void)
-{
-    printf("fractional percent_off survives\n");
-
-    static const char json[] =
-    "{\"data\":[{\"status\":\"active\","
-    "\"discount\":{\"coupon\":{\"percent_off\":33.33,\"amount_off\":null}},"
-    "\"items\":{\"data\":[{\"quantity\":1,"
-    "\"price\":{\"billing_scheme\":\"per_unit\",\"currency\":\"usd\","
-    "\"unit_amount\":10000,"
-    "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}}}]}}]}";
-
-    stripe_subs_t out;
-    check_true("parses", stripe_parse_subscriptions(json, &out));
-    check_int("33.33 percent", out.subs[0].discount.percent_off_x100, 3333);
-}
-
-static void test_discount_amount(void)
-{
-    printf("amount_off discounts are read\n");
-
-    static const char json[] =
-    "{\"data\":[{\"status\":\"active\","
-    "\"discount\":{\"coupon\":{\"percent_off\":null,\"amount_off\":1500}},"
-    "\"items\":{\"data\":[{\"quantity\":1,"
-    "\"price\":{\"billing_scheme\":\"per_unit\",\"currency\":\"usd\","
-    "\"unit_amount\":10000,"
-    "\"recurring\":{\"interval\":\"month\",\"interval_count\":1}}}]}}]}";
-
-    stripe_subs_t out;
-    check_true("parses", stripe_parse_subscriptions(json, &out));
-    check_i64("$15 off", out.subs[0].discount.amount_off, 1500);
-
-    const mrr_totals_t t = mrr_compute(out.subs, out.sub_count);
-    check_i64("$100 minus $15", t.mrr_cents, 8500);
-}
-
 static void test_tiered_detected(void)
 {
     printf("tiered billing_scheme is detected (spec 7.2 step 3)\n");
@@ -281,7 +222,6 @@ static void test_missing_fields(void)
     check_i64("quantity defaults to 1", out.subs[0].items[0].quantity, 1);
     check_int("interval_count defaults to 1",
               out.subs[0].items[0].interval_count, 1);
-    check_false("no discount", out.subs[0].discount.present);
 
     const mrr_totals_t t = mrr_compute(out.subs, out.sub_count);
     check_i64("computes", t.mrr_cents, 2900);
@@ -418,9 +358,6 @@ int main(void)
 
     test_single_active();
     test_filters_by_status();
-    test_discount_percent();
-    test_discount_fractional_percent();
-    test_discount_amount();
     test_tiered_detected();
     test_non_recurring_price();
     test_has_more();

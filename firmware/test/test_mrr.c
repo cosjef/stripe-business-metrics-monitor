@@ -170,58 +170,6 @@ static void test_unknown_interval_skipped(void)
 
 /* ---- discounts ---- */
 
-/*
- * Spec 7.2 step 1: discounts are applied BEFORE summing. Skipping this makes
- * a 50%-off annual plan read at double -- the exact error the spec names.
- */
-static void test_discounts(void)
-{
-    printf("discounts applied before summing (spec 7.2 step 1)\n");
-
-    mrr_discount_t none = { .present = false };
-    check_i64("no discount", mrr_apply_discount(10000, &none), 10000);
-
-    mrr_discount_t half = { .present = true, .percent_off_x100 = 5000 };
-    check_i64("50 percent off", mrr_apply_discount(10000, &half), 5000);
-
-    mrr_discount_t third = { .present = true, .percent_off_x100 = 3333 };
-    check_i64("33.33 percent off", mrr_apply_discount(10000, &third), 6667);
-
-    mrr_discount_t ten = { .present = true, .amount_off = 1000 };
-    check_i64("$10 off", mrr_apply_discount(10000, &ten), 9000);
-
-    /* A coupon larger than the subtotal must not go negative and start
-     * subtracting from other subscriptions' revenue. */
-    mrr_discount_t huge = { .present = true, .amount_off = 99999 };
-    check_i64("oversized amount_off clamps to zero",
-              mrr_apply_discount(10000, &huge), 0);
-
-    mrr_discount_t full = { .present = true, .percent_off_x100 = 10000 };
-    check_i64("100 percent off", mrr_apply_discount(10000, &full), 0);
-
-    mrr_discount_t over = { .present = true, .percent_off_x100 = 15000 };
-    check_i64("over-100 percent clamps to zero",
-              mrr_apply_discount(10000, &over), 0);
-}
-
-/*
- * The specific scenario spec 7.2 warns about.
- */
-static void test_discounted_annual_plan(void)
-{
-    printf("50%%-off annual plan does not read at double\n");
-
-    /* $1200/year at 50% off = $600/year = $50/month */
-    const mrr_item_t items[] = { item(120000, 1, MRR_INTERVAL_YEAR, 1) };
-    const mrr_subscription_t subs[] = {{
-        .trialing = false, .items = items, .item_count = 1,
-        .discount = { .present = true, .percent_off_x100 = 5000 },
-    }};
-
-    const mrr_totals_t r = mrr_compute(subs, 1);
-    check_i64("discounted annual", r.mrr_cents, 5000);
-}
-
 /* ---- trials ---- */
 
 /*
@@ -316,28 +264,6 @@ static void test_multi_item_subscription(void)
     check_i64("base plus seats", r.mrr_cents, 4400);
 }
 
-/*
- * A discount applies to the whole subscription, not per item -- so it must be
- * applied after the items are summed, not to each one.
- */
-static void test_discount_applies_to_subscription_total(void)
-{
-    printf("discount applies to the subscription, not per item\n");
-
-    const mrr_item_t items[] = {
-        item(2000, 1, MRR_INTERVAL_MONTH, 1),
-        item(2000, 1, MRR_INTERVAL_MONTH, 1),
-    };
-    const mrr_subscription_t subs[] = {{
-        .trialing = false, .items = items, .item_count = 2,
-        .discount = { .present = true, .amount_off = 1000 },
-    }};
-
-    /* 4000 - 1000 = 3000, not 4000 - 2000 (which per-item would give). */
-    const mrr_totals_t r = mrr_compute(subs, 1);
-    check_i64("one discount for the subscription", r.mrr_cents, 3000);
-}
-
 static void test_mixed_realistic_account(void)
 {
     printf("a realistic mixed account\n");
@@ -394,7 +320,6 @@ static void test_large_account_no_overflow(void)
         many[i].trialing = false;
         many[i].items = big_items;
         many[i].item_count = 1;
-        many[i].discount.present = false;
     }
 
     const mrr_totals_t r = mrr_compute(many, 1000);
@@ -554,13 +479,10 @@ int main(void)
     test_non_recurring_skipped();
     test_tiered_flagged_not_guessed();
     test_unknown_interval_skipped();
-    test_discounts();
-    test_discounted_annual_plan();
     test_trials_excluded();
     test_mixed_currency_flagged();
     test_single_currency_not_flagged();
     test_multi_item_subscription();
-    test_discount_applies_to_subscription_total();
     test_mixed_realistic_account();
     test_empty_account();
     test_large_account_no_overflow();

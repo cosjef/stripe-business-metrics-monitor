@@ -45,36 +45,6 @@ static bool status_counts(const char *status, bool *is_trialing)
     return false;
 }
 
-static void parse_discount(const cJSON *sub, mrr_discount_t *out)
-{
-    memset(out, 0, sizeof(*out));
-
-    const cJSON *discount = cJSON_GetObjectItemCaseSensitive(sub, "discount");
-    if (!cJSON_IsObject(discount)) {
-        return;
-    }
-
-    const cJSON *coupon = cJSON_GetObjectItemCaseSensitive(discount, "coupon");
-    if (!cJSON_IsObject(coupon)) {
-        return;
-    }
-
-    const cJSON *pct = cJSON_GetObjectItemCaseSensitive(coupon, "percent_off");
-    if (cJSON_IsNumber(pct)) {
-        /* Stripe sends a float like 33.33. Scale to hundredths of a percent so
-         * fractional coupons survive as integers. Round to nearest to avoid
-         * losing a hundredth to truncation. */
-        out->percent_off_x100 = (int32_t)(pct->valuedouble * 100.0 + 0.5);
-        out->present = true;
-    }
-
-    const cJSON *amt = cJSON_GetObjectItemCaseSensitive(coupon, "amount_off");
-    if (cJSON_IsNumber(amt)) {
-        out->amount_off = (int64_t)amt->valuedouble;
-        out->present = true;
-    }
-}
-
 static bool parse_item(const cJSON *item_json, mrr_item_t *out)
 {
     memset(out, 0, sizeof(*out));
@@ -162,7 +132,6 @@ bool stripe_parse_subscriptions(const char *json, stripe_subs_t *out)
         mrr_subscription_t *sub = &out->subs[out->sub_count];
         memset(sub, 0, sizeof(*sub));
         sub->trialing = trialing;
-        parse_discount(sub_json, &sub->discount);
 
         /* Items live at items.data, not items directly. */
         const cJSON *items = cJSON_GetObjectItemCaseSensitive(sub_json, "items");

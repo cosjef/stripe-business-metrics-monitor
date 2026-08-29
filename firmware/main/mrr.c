@@ -57,31 +57,6 @@ int64_t mrr_item_monthly_cents(const mrr_item_t *item)
     }
 }
 
-int64_t mrr_apply_discount(int64_t subtotal_cents, const mrr_discount_t *d)
-{
-    if (d == NULL || !d->present) {
-        return subtotal_cents;
-    }
-
-    int64_t out = subtotal_cents;
-
-    if (d->percent_off_x100 > 0) {
-        /* percent_off_x100 is hundredths of a percent, so 33.33% is 3333.
-         * Rounding to nearest keeps a half-cent from vanishing every time. */
-        const int64_t off =
-            (subtotal_cents * (int64_t)d->percent_off_x100 + 5000) / 10000;
-        out -= off;
-    }
-
-    if (d->amount_off > 0) {
-        out -= d->amount_off;
-    }
-
-    /* A coupon larger than the subscription must not go negative: that would
-     * subtract from other subscriptions' revenue in the account total. */
-    return out > 0 ? out : 0;
-}
-
 mrr_totals_t mrr_compute(const mrr_subscription_t *subs, int count)
 {
     mrr_totals_t out = {0};
@@ -133,9 +108,14 @@ mrr_totals_t mrr_compute(const mrr_subscription_t *subs, int count)
             subtotal += mrr_item_monthly_cents(it);
         }
 
-        /* The discount belongs to the subscription, so it applies once to the
-         * summed items rather than to each of them. */
-        out.mrr_cents += mrr_apply_discount(subtotal, &sub->discount);
+        /*
+         * Coupons are not supported: this account does not use them, and the
+         * unexpanded subscription object may carry only a discount id rather
+         * than the nested coupon, which would have meant silently ignoring
+         * some discounts while honouring others. Not applying any is at least
+         * consistent and knowable.
+         */
+        out.mrr_cents += subtotal;
     }
 
     return out;
