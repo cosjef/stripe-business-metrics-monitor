@@ -43,7 +43,7 @@ docs/           the spec, the port plan, and the hardware notes
 ```
 
 Nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
-`freertos/*`. That single constraint is what lets 1,520 checks run on a laptop
+`freertos/*`. That single constraint is what lets 1,471 checks run on a laptop
 with no hardware and no SDK. See [core/README.md](core/README.md).
 
 ## Status
@@ -86,7 +86,7 @@ make
 for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-1,520 checks across 25 suites. Most cover pure logic — text measurement, hero
+1,471 checks across 24 suites. Most cover pure logic — text measurement, hero
 auto-sizing, MRR arithmetic, the streaming JSON scanners, rotation rules,
 freshness, battery thresholds, WiFi retry policy. One boots real LVGL against
 an offscreen framebuffer and asserts on actual pixels.

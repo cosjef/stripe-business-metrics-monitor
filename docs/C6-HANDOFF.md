@@ -328,8 +328,9 @@ rejected. It renders well and the data is real, but tiers change only when
 the owner reprices -- perhaps twice a year. A glanceable device should
 spend its space on what moves. Kept here so the idea is not re-proposed.
 
-The mock lives in `core/test/mock_mrr.c` (render_subs) if it is ever
-wanted.
+The mock that drew it has since been deleted along with the rest of the
+design scratchpad; `git log -- core/test/mock_mrr.c` has it if the idea ever
+comes back.
 
 
 ---

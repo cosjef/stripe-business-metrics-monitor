@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Print the per-glyph advance-width table for main/hero_size.c.
+Print the per-glyph advance-width table for core/src/hero_size.c.
 
 The firmware measures text width per glyph (see hero_size.h for why it does not
 use the spec's 0.6em monospace constant). That table must match the font that
@@ -9,7 +9,7 @@ LVGL actually renders, so regenerate it whenever the face or weight changes:
     pip install Pillow
     ./tools/dump_advances.py > /tmp/table.txt
 
-then paste the array body into glyph_adv_x1000[] in main/hero_size.c and update
+then paste the array body into glyph_adv_x1000[] in core/src/hero_size.c and update
 GLYPH_FALLBACK_X1000 to the reported MAX.
 """
 import os

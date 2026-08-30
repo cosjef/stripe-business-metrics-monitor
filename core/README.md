@@ -12,7 +12,7 @@ core/
   src/       screen rendering, MRR maths, the streaming parsers, rotation
   include/   their headers, plus the layout constants for both panels
   fonts/     generated bitmap faces (8.6MB; regenerate with tools/gen_fonts.sh)
-  test/      the host suite, 1,520 checks across 25 suites
+  test/      the host suite, 1,471 checks across 24 suites
   tools/     font generation and the advance-width dumper
 ```
 
@@ -24,7 +24,7 @@ rule below can be checked, and the tests can run without an SDK.
 
 The project previously carried a second board, and this split is what let both
 share one implementation. That board is gone, but the separation earns its
-keep regardless -- it is the reason 1,520 checks run on a laptop.
+keep regardless -- it is the reason 1,471 checks run on a laptop.
 
 ## The rule
 

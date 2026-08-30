@@ -1,6 +1,13 @@
 # Stripe Revenue Display
 
-**Design and build specification for a 1.54" 240x240 LCD revenue instrument**
+**Design and build specification for a desk revenue instrument**
+
+> Written for a 1.54" 240x240 LCD, which was the original hardware. The
+> principles -- legibility in millimetres at 50cm, one fact per screen, the
+> colour discipline, never displaying a figure the device cannot vouch for --
+> carried over to the 480x480 AMOLED unchanged. The pixel dimensions did not;
+> where this document names a size, see `core/include/layout_c6.h` for the
+> value in use and `core/src/geometry.c` for how it was derived.
 
 Version 1.0 | August 2026
 

@@ -1,6 +1,13 @@
-# Firmware Build Plan
+# Firmware Build Plan (historical)
 
-Tracks implementation progress against [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md). Update checkboxes as work lands; add dated notes under a stage when a decision changes or a gap is closed.
+> **This describes the original ESP32-S3 build and is kept as a record, not as
+> a roadmap.** Its stages and checkboxes track a device this repository no
+> longer contains; the C6 port that replaced it is documented in
+> [C6-HANDOFF.md](C6-HANDOFF.md), and the current state of the firmware is in
+> the top-level README. Nothing here is a statement about what works today.
+
+Tracked implementation progress against
+[stripe-revenue-display-spec.md](stripe-revenue-display-spec.md).
 
 ---
 

@@ -1,4 +1,11 @@
-# Port Plan: ESP32-C6 Touch AMOLED 2.16"
+# Port Plan: ESP32-C6 Touch AMOLED 2.16" (historical)
+
+> **Written before the port began, and kept as a record of the plan rather
+> than of the outcome.** Several of its assumptions did not survive contact
+> with the hardware -- most notably that the port would stay on ESP-IDF. What
+> actually happened, and why the display layer moved to Arduino, is in
+> [C6-HANDOFF.md](C6-HANDOFF.md).
+
 
 Porting the Stripe revenue display from the Waveshare ESP32-S3-LCD-1.54
 (240x240 IPS, no touch) to the ESP32-C6-Touch-AMOLED-2.16 (480x480 AMOLED,
