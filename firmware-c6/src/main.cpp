@@ -1,5 +1,5 @@
 /*
- * Stripe Revenue Display -- Arduino port, stage 3: provisioning.
+ * Stripe Business Metrics Monitor -- Arduino port, stage 3: provisioning.
  *
  * The device now provisions itself. On first boot it has no credentials, so
  * it runs setup mode: an open "Setup-XXXX" AP with a captive portal (spec
@@ -136,7 +136,7 @@ static const char *s_labels[SCREEN_COUNT] = {
     [SCREEN_CANCELLATIONS] = "CANCELLED",
     /* "ARR" rather than "ANNUAL RUN RATE": the long form ran under the
      * panel-centred battery glyph, and the acronym is what anyone reading a
-     * revenue display already uses. The subtitle still says "at current
+     * revenue readout already uses. The subtitle still says "at current
      * MRR", so nothing is lost. */
     [SCREEN_ARR]           = "ARR",
     [SCREEN_ARPU]          = "ARPU",
@@ -1359,7 +1359,7 @@ void setup(void)
     delay(2000);
 
     Serial.println();
-    Serial.println("=== Stripe Revenue Display " FIRMWARE_VERSION " ===");
+    Serial.println("=== Stripe Business Metrics Monitor " FIRMWARE_VERSION " ===");
 
     buttons_begin();
     clear_values();

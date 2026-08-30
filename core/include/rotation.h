@@ -61,7 +61,7 @@ bool rotation_screen_visible(screen_id_t id, const rotation_state_t *st);
  * Fill `out` with the visible screen ids in display order, returning how many.
  * `out` must have room for SCREEN_COUNT entries.
  *
- * Never returns zero: MRR is always present, because a revenue display with
+ * Never returns zero: MRR is always present, because a revenue readout with
  * no screens is worse than one showing a dash.
  */
 int rotation_build(const rotation_state_t *st, screen_id_t *out);

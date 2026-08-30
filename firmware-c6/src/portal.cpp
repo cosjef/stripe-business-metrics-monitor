@@ -41,7 +41,7 @@ static char s_ssid[33];
 static const char PAGE_HTML_HEAD[] =
 "<!DOCTYPE html><html><head>"
 "<meta name=viewport content='width=device-width,initial-scale=1'>"
-"<title>Set up your revenue display</title><style>"
+"<title>Set up your Stripe monitor</title><style>"
 "*{box-sizing:border-box}"
 "body{font:16px/1.5 -apple-system,system-ui,sans-serif;background:#121211;"
 "color:#F4F2EC;margin:0;padding:24px;max-width:420px;margin:0 auto}"
@@ -60,7 +60,7 @@ static const char PAGE_HTML_HEAD[] =
 ".rev input{width:auto;margin:0}"
 ".rev label{margin:0;color:#8E8C84;font-size:14px}"
 "</style></head><body>"
-"<h1>Set up your display</h1>"
+"<h1>Set up your monitor</h1>"
 "<p class=sub>Choose the WiFi network the display should join.</p>";
 
 static const char PAGE_HTML_TAIL[] =

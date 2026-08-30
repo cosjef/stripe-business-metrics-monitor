@@ -139,7 +139,7 @@ int64_t mrr_arpu_cents(int64_t mrr_cents, int active_count)
         return 0;
     }
 
-    /* Truncate rather than round: on a revenue display, understating
+    /* Truncate rather than round: on a revenue readout, understating
      * per-customer value is the safer direction to err. */
     return mrr_cents / active_count;
 }

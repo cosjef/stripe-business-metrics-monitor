@@ -359,7 +359,7 @@ static void test_arpu(void)
     check_i64("zero revenue", mrr_arpu_cents(0, 28), 0);
 
     /* Truncation, not rounding: overstating per-customer revenue would be the
-     * wrong direction to err on a revenue display. */
+     * wrong direction to err on a revenue readout. */
     check_i64("truncates rather than rounds up", mrr_arpu_cents(1099, 10), 109);
 }
 

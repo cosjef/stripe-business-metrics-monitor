@@ -1,7 +1,7 @@
 /*
  * Layout and palette constants.
  *
- * Every value here traces to stripe-revenue-display-spec.md. Do not tune these
+ * Every value here traces to stripe-business-metrics-spec.md. Do not tune these
  * by eye on the bench without updating the spec -- the sizes are derived from
  * physical legibility math (spec 2.2), not aesthetics.
  */

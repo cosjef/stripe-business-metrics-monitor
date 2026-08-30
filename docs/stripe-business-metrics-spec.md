@@ -1,4 +1,4 @@
-# Stripe Revenue Display
+# Stripe Business Metrics Monitor
 
 **Design and build specification for a desk revenue instrument**
 

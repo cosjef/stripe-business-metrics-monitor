@@ -1,7 +1,7 @@
 # Firmware Build Plan
 
 State of the ESP32-C6 build, against
-[stripe-revenue-display-spec.md](stripe-revenue-display-spec.md). For how the
+[stripe-business-metrics-spec.md](stripe-business-metrics-spec.md). For how the
 device came to be on Arduino rather than ESP-IDF, and the hardware facts that
 cost the most to establish, see [C6-HANDOFF.md](C6-HANDOFF.md).
 

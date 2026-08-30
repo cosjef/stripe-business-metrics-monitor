@@ -1,7 +1,8 @@
-# Stripe Revenue Display
+# Stripe Business Metrics Monitor
 
-A small instrument that sits on your desk and shows your live Stripe
-revenue.
+An always-on desk instrument for a Stripe subscription business: what you
+are making, who is arriving and leaving, what the month did, and what needs
+you today.
 
 ![MRR](docs/img/mrr.png)
 
@@ -300,7 +301,7 @@ and what is deliberately not built.
 ### Deviations from the spec
 
 Findings from real hardware that contradict
-[the written spec](docs/stripe-revenue-display-spec.md):
+[the written spec](docs/stripe-business-metrics-spec.md):
 
 1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** Inherited from
    an IPS panel where `0x04`-`0x30` collapsed to the same mid-gray.
