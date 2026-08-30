@@ -41,11 +41,10 @@ shorter loop than a mature one.
 | ![Net 30d](docs/img/net_30d.png) | ![Failed](docs/img/failed.png) | ![Stale](docs/img/stale.png) |
 | **NET 30D**: what the month did to revenue | **FAILED**: payments that need a nudge | **stale**: what it shows instead of a number it cannot vouch for |
 
-The last tile is not a screen but a state. If a fetch fails, the deck says so
-rather than leaving an old figure up looking current.
-
-These images are not mockups. They are rendered from the firmware itself, at
-the panel's real 480x480 resolution.
+The last tile is not a screen but a state: if a fetch fails, the deck says so
+rather than leaving an old figure up looking current. None of these are
+mockups, they are rendered from the firmware itself at the panel's real
+480x480 resolution.
 
 ## What you need
 
