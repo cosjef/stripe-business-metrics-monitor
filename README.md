@@ -1,10 +1,8 @@
 # Stripe Business Metrics Monitor
 
-An always-on desk instrument for a Stripe subscription business: what you're
-making, who's arriving and leaving, what the month did, and what needs your
-attention. A dashboard tells you how the business is doing when you remember
-to ask. This sits in your peripheral vision and tells you at a glance,
-without being asked.
+A small desktop device that shows your business health at a glance. It sits
+in your peripheral vision and tells you without being asked. No dashboard to
+browse to.
 
 ![MRR](docs/img/mrr.png)
 
@@ -24,10 +22,9 @@ days, combining growth and churn into one number.
 **What needs your attention:** Failed payments, how much revenue is at risk,
 and when Stripe will retry them.
 
-No app, no browser tab you forget to open, and your revenue data goes to
-Stripe and nowhere else. There's nothing to solder and no firmware to write.
-Buy a Waveshare ESP32-C6 board, flash it over USB, then finish setup from
-your phone over Wi-Fi.
+Your revenue data goes to Stripe and nowhere else. There's nothing to solder
+and no firmware to write. Buy a Waveshare ESP32-C6 board, flash it over USB,
+then finish setup from your phone over Wi-Fi.
 
 ## What it shows
 
