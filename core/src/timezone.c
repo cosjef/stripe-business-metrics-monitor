@@ -1,72 +1,29 @@
 /*
- * Timezone resolution. See timezone.h for why this is looked up rather than
- * configured, and why the validation is strict.
+ * Timezone resolution. See timezone.h for why the offset is used rather
+ * than the IANA name the lookup also returns.
  */
 #include "timezone.h"
 
+#include <stdio.h>
 #include <string.h>
 
-/*
- * Characters a POSIX TZ string is allowed to contain.
- *
- * Letters and digits for the zone abbreviations and offsets, and the small
- * punctuation set the format actually uses: sign, colon, comma, dot, slash,
- * and the angle brackets that wrap numeric abbreviations like <+0530>.
- * Everything else, including whitespace and control bytes, is rejected.
- */
-static bool tz_char_ok(char c)
+bool tz_offset_is_valid(int seconds)
 {
-    if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
-        return true;
-    }
-    if (c >= '0' && c <= '9') {
-        return true;
-    }
-    return c == '+' || c == '-' || c == ':' || c == ',' ||
-           c == '.' || c == '/' || c == '<' || c == '>';
+    return seconds >= TZ_OFFSET_MIN && seconds <= TZ_OFFSET_MAX;
 }
 
-bool tz_is_valid(const char *s)
+bool tz_parse_offset(const char *json, int *out)
 {
-    if (s == NULL || s[0] == '\0') {
+    if (json == NULL || out == NULL) {
         return false;
     }
 
-    size_t n = 0;
-    for (const char *p = s; *p != '\0'; p++) {
-        if (!tz_char_ok(*p)) {
-            return false;
-        }
-        n++;
-        if (n >= TZ_MAX_LEN) {
-            /* At the cap rather than past it: the value still needs a NUL. */
-            return false;
-        }
-    }
-
-    /*
-     * A TZ string starts with a zone abbreviation, which is either letters
-     * or a bracketed numeric form. Requiring that rejects a response that is
-     * all punctuation while still accepting every real zone.
-     */
-    return (s[0] >= 'A' && s[0] <= 'Z') ||
-           (s[0] >= 'a' && s[0] <= 'z') ||
-           s[0] == '<';
-}
-
-bool tz_parse_response(const char *json, char *out, size_t out_len)
-{
-    if (json == NULL || out == NULL || out_len == 0) {
-        return false;
-    }
-
-    const char *key = strstr(json, "\"timezone\"");
+    const char *key = strstr(json, "\"offset\"");
     if (key == NULL) {
         return false;
     }
 
-    /* Step over the key, then the colon, tolerating spaces on either side. */
-    const char *p = key + strlen("\"timezone\"");
+    const char *p = key + strlen("\"offset\"");
     while (*p == ' ' || *p == '\t') {
         p++;
     }
@@ -77,34 +34,63 @@ bool tz_parse_response(const char *json, char *out, size_t out_len)
     while (*p == ' ' || *p == '\t') {
         p++;
     }
-    if (*p != '"') {
-        return false;
-    }
-    p++;
 
-    const char *end = strchr(p, '"');
-    if (end == NULL) {
-        return false;
+    /* A bare number. A quoted one is a different response shape than the
+     * one this was written against, so it is refused rather than guessed
+     * at. */
+    bool negative = false;
+    if (*p == '-') {
+        negative = true;
+        p++;
     }
-
-    const size_t len = (size_t)(end - p);
-    if (len == 0 || len >= out_len || len >= TZ_MAX_LEN) {
-        /*
-         * Refuse rather than truncate. A truncated TZ string is not a
-         * malformed one, it is a different and plausible timezone, which
-         * would file history under the wrong day with no sign of trouble.
-         */
+    if (*p < '0' || *p > '9') {
         return false;
     }
 
-    char tmp[TZ_MAX_LEN];
-    memcpy(tmp, p, len);
-    tmp[len] = '\0';
+    long value = 0;
+    while (*p >= '0' && *p <= '9') {
+        value = value * 10 + (*p - '0');
+        if (value > 100000) {          /* far past any real offset */
+            return false;
+        }
+        p++;
+    }
+    if (negative) {
+        value = -value;
+    }
 
-    if (!tz_is_valid(tmp)) {
+    if (!tz_offset_is_valid((int)value)) {
         return false;
     }
 
-    memcpy(out, tmp, len + 1);
+    *out = (int)value;
     return true;
+}
+
+bool tz_format_offset(int seconds, char *out, size_t out_len)
+{
+    if (out == NULL || out_len == 0 || !tz_offset_is_valid(seconds)) {
+        return false;
+    }
+
+    /*
+     * POSIX states the offset as the value ADDED to local time to reach
+     * UTC, which is the opposite sign from the everyday convention. New
+     * York in summer is UTC-4 in conversation and "UTC4" in a TZ string.
+     */
+    const int posix = -seconds;
+
+    const char *sign = posix < 0 ? "-" : "";
+    const int abs_secs = posix < 0 ? -posix : posix;
+    const int hours = abs_secs / 3600;
+    const int minutes = (abs_secs % 3600) / 60;
+
+    int n;
+    if (minutes == 0) {
+        n = snprintf(out, out_len, "UTC%s%d", sign, hours);
+    } else {
+        n = snprintf(out, out_len, "UTC%s%d:%02d", sign, hours, minutes);
+    }
+
+    return n > 0 && (size_t)n < out_len;
 }

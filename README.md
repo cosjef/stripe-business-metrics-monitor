@@ -208,14 +208,14 @@ terminal after installing, then run `pio --version` again.
 The device reads your Stripe account and sends that data nowhere else. There
 is no telemetry, no analytics, and no server belonging to this project.
 
-It makes exactly one request to anyone other than Stripe. On first sync it
-asks [ip-api.com](https://ip-api.com) which timezone its address is in, so
-the daily history rolls over at your midnight rather than someone else's.
-The answer is cached, so this happens once per setup, not once per boot. The
-request sends nothing but the connection itself, and no Stripe data is
-involved. If it fails, or if you would rather it never happened, the device
-falls back to US Eastern and carries on; blocking that host costs you a
-correct day boundary and nothing else.
+There is one request to someone other than Stripe. To roll the daily
+history over at your midnight rather than someone else's, the device asks
+[ip-api.com](https://ip-api.com) for the UTC offset of its own address. It
+sends nothing but the connection itself, no Stripe data is involved, and
+the answer is cached and re-checked once a day so a daylight-saving change
+is picked up. If the lookup fails the device falls back to US Eastern and
+carries on, so blocking that host costs you a correct day boundary and
+nothing else.
 
 Two things worth knowing before you set one up in a busy place: the setup
 network is open and the key page is plain HTTP, so during those few minutes

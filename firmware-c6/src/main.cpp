@@ -91,7 +91,7 @@ extern "C" {
  * failed lookup. See core/include/timezone.h.
  */
 #define TZ_LOOKUP_HOST "ip-api.com"
-#define TZ_LOOKUP_PATH "/json/?fields=timezone"
+#define TZ_LOOKUP_PATH "/json/?fields=offset"
 #define TZ_LOOKUP_TIMEOUT_MS 4000
 #define NTP_SERVER_1 "pool.ntp.org"
 #define NTP_SERVER_2 "time.nist.gov"
@@ -212,6 +212,9 @@ static battery_reading_t s_battery;
 static history_t s_history;
 static int32_t s_history_day = -1;   /* last epoch day recorded */
 static bool s_clock_ok;
+/* Set when the local day rolls over, so the fixed offset resolved from a
+ * single instant gets re-checked against any DST change. */
+static bool s_tz_recheck_due;
 
 /* Defined below with the rest of the time handling; used by apply_totals. */
 static void record_history(int64_t mrr_cents);
@@ -1062,27 +1065,41 @@ static bool lookup_timezone(char *out, size_t out_len)
     buf[n] = '\0';
     client.stop();
 
-    return tz_parse_response(buf, out, out_len);
+    int offset = 0;
+    if (!tz_parse_offset(buf, &offset)) {
+        return false;
+    }
+    return tz_format_offset(offset, out, out_len);
 }
 
 static void sync_clock(void)
 {
     /*
-     * Cached first: the lookup is a setup-time cost, not a per-boot one, and
-     * a device that has been provisioned should not depend on a third party
-     * being reachable to know what day it is.
+     * A resolved zone is a fixed offset with no DST rules, because a single
+     * instant cannot express one. So the answer is re-fetched rather than
+     * cached forever: when a zone shifts in spring, the device is wrong for
+     * at most a day instead of half a year. The cache is what keeps a boot
+     * from depending on that host being reachable.
      */
     char tz[TZ_MAX_LEN];
-    if (!settings_get_timezone(tz, sizeof(tz))) {
-        if (lookup_timezone(tz, sizeof(tz))) {
-            settings_set_timezone(tz);
-            Serial.printf("timezone: %s (resolved)\n", tz);
-        } else {
+    const bool have_cached = settings_get_timezone(tz, sizeof(tz));
+
+    if (!have_cached || s_tz_recheck_due) {
+        char fresh[TZ_MAX_LEN];
+        if (lookup_timezone(fresh, sizeof(fresh))) {
+            if (!have_cached || strcmp(fresh, tz) != 0) {
+                Serial.printf("timezone: %s%s\n", fresh,
+                              have_cached ? " (changed)" : " (resolved)");
+                settings_set_timezone(fresh);
+            }
+            snprintf(tz, sizeof(tz), "%s", fresh);
+            s_tz_recheck_due = false;
+        } else if (!have_cached) {
             snprintf(tz, sizeof(tz), "%s", TZ_FALLBACK);
             Serial.printf("timezone: lookup failed, using %s\n", tz);
         }
-    } else {
-        Serial.printf("timezone: %s (cached)\n", tz);
+        /* A failed re-check on a device that has a cached value keeps the
+         * cached one and tries again tomorrow. */
     }
 
     configTzTime(tz, NTP_SERVER_1, NTP_SERVER_2);
@@ -1124,7 +1141,8 @@ static void record_history(int64_t mrr_cents)
         return;             /* no clock: record nothing rather than a guess */
     }
 
-    const bool day_changed = (day != s_history_day);
+    const int32_t previous_day = s_history_day;
+    const bool day_changed = (day != previous_day);
     history_record(&s_history, day, mrr_cents);
     s_history_day = day;
 
@@ -1132,6 +1150,16 @@ static void record_history(int64_t mrr_cents)
         if (settings_save_history(&s_history, sizeof(s_history))) {
             Serial.printf("history: %d sample(s) saved\n",
                           history_count(&s_history));
+        }
+        /*
+         * The resolved timezone is a fixed offset taken at one instant, so
+         * it cannot know about a DST change. Re-check on the day boundary,
+         * which is both the natural cadence and the thing the offset exists
+         * to place correctly. sync_clock() applies whatever comes back.
+         */
+        if (previous_day >= 0) {
+            s_tz_recheck_due = true;
+            sync_clock();
         }
     }
 }
