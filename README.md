@@ -205,17 +205,17 @@ is no telemetry, no analytics, and no server belonging to this project.
 It makes one request to anyone other than Stripe. To know when your day ends,
 it asks [ip-api.com](https://ip-api.com) for the UTC offset of its own
 address, once a day. That request carries no Stripe data. Block it and the
-device falls back to US Eastern, which costs you a correct day boundary and
-nothing else.
+device falls back to US Eastern, which costs you an accurate day boundary
+and nothing else.
 
 Setup runs unencrypted. For those few minutes the device serves an open
-network and a plain HTTP key page, so someone in radio range could capture
-your Wi-Fi password and your Stripe key. Do it somewhere quiet. After that,
-every request to Stripe is TLS against a pinned certificate.
+network and a plain HTTP key page, so anyone in radio range could capture
+your Wi-Fi password and your Stripe key. Do it somewhere quiet. Once setup
+is done, every request to Stripe is TLS against a pinned certificate.
 
-The key is stored unencrypted on the board. That is a deliberate trade: a
-read-only restricted key can reveal your subscriber count, but it cannot
-move money.
+The key is stored unencrypted on the board. That is a deliberate trade: use
+a read-only restricted key, and the worst it can leak is your subscriber
+count. It cannot move money.
 
 ## For developers
 
