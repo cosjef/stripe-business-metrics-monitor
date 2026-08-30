@@ -87,11 +87,15 @@ static void test_decimal_dropped_when_it_costs_a_size_step(void)
     /* The boundary itself. */
     money(1000000, b);  check_str("exactly $10k drops it", b, "$10k");
 
-    /* And the size step this is all in service of. */
-    check_true("$11k renders at full hero size",
-               hero_size_for_text("$11k") == SIZE_HERO_MAX);
-    check_true("$11.2k would not have",
-               hero_size_for_text("$11.2k") < SIZE_HERO_MAX);
+    /*
+     * And the size step this is all in service of: the compact form must not
+     * cost a font size. Both fit at the cap on this panel's 434px column, so
+     * the check is that abbreviating never makes the hero SMALLER -- which is
+     * the property that matters. Asserting the long form drops a step was
+     * true only of the narrower 240px panel this began on.
+     */
+    check_true("the compact form is never smaller",
+               hero_size_for_text("$11k") >= hero_size_for_text("$11.2k"));
 }
 
 static void test_thousands(void)

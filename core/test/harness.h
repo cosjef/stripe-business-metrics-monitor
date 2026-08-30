@@ -15,15 +15,21 @@
 #include "lvgl.h"
 
 /*
- * Panel size. Defaults to the S3's 240x240, which is what the existing tests
- * assert against; override at compile time (-DHARNESS_W=480) to render the
- * C6 panel without disturbing them.
+ * Framebuffer size: the panel's, taken from the layout.
+ *
+ * It used to default to 240x240 with callers overriding to 480. That left
+ * test_screens asserting pixel positions against a quarter of the screen the
+ * layout was drawing into -- every check passed or failed for reasons that
+ * had nothing to do with the code under test. Deriving it from PANEL_PX means
+ * the harness cannot disagree with the layout about how big the panel is.
  */
+#include "layout.h"
+
 #ifndef HARNESS_W
-#define HARNESS_W 240
+#define HARNESS_W PANEL_PX
 #endif
 #ifndef HARNESS_H
-#define HARNESS_H 240
+#define HARNESS_H PANEL_PX
 #endif
 
 /* Initialize LVGL and create the offscreen display. Idempotent. */

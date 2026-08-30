@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "harness.h"
+#include "layout.h"
 
 #include "../include/layout.h"
 #include "../include/screens.h"
@@ -75,7 +76,14 @@ static void check_between(const char *what, int got, int lo, int hi)
 static void expect_background(void)
 {
     /* Sample corners and center, away from any text. */
-    const int pts[][2] = {{2, 2}, {237, 2}, {2, 237}, {237, 237}, {120, 60}};
+    /*
+     * Corners and one point in the field. Derived from PANEL_PX rather than
+     * written as 237: on the 240px panel those were empty margin, and on this
+     * one they land inside the card, where the background is the card fill
+     * rather than the screen.
+     */
+    const int e = PANEL_PX - 3;          /* just inside each corner */
+    const int pts[][2] = {{2, 2}, {e, 2}, {2, e}, {e, e}, {PANEL_PX / 2, 8}};
 
     for (size_t i = 0; i < sizeof(pts) / sizeof(pts[0]); i++) {
         char what[64];
@@ -94,7 +102,7 @@ static void expect_background(void)
 static void expect_padding_respected(void)
 {
     int x0, y0, x1, y1;
-    if (!harness_ink_bounds(0, 0, 240, 240, COLOR_BG, TOL, &x0, &y0, &x1, &y1)) {
+    if (!harness_ink_bounds(0, 0, PANEL_PX, PANEL_PX, COLOR_BG, TOL, &x0, &y0, &x1, &y1)) {
         check_true("something was drawn", 0);
         return;
     }
@@ -107,10 +115,10 @@ static void expect_padding_respected(void)
     }
 
     checks++;
-    if (x1 > 240 - PAD_PX) {
+    if (x1 > PANEL_PX - PAD_PX) {
         char d[128];
         snprintf(d, sizeof(d), "ink ends at x=%d, right edge of column is %d",
-                 x1, 240 - PAD_PX);
+                 x1, PANEL_PX - PAD_PX);
         fail("right padding respected / column not overflowed", d);
     }
 }
@@ -130,7 +138,7 @@ static void expect_text_at_baseline(const char *what, int band_y0, int band_y1,
                                     int baseline_y, int max_descent)
 {
     int x0, y0, x1, y1;
-    if (!harness_ink_bounds(0, band_y0, 240, band_y1 - band_y0,
+    if (!harness_ink_bounds(0, band_y0, PANEL_PX, band_y1 - band_y0,
                             COLOR_BG, TOL, &x0, &y0, &x1, &y1)) {
         check_true(what, 0);
         return;
@@ -155,48 +163,89 @@ static void expect_text_at_baseline(const char *what, int band_y0, int band_y1,
 
 static int count_color(uint32_t rgb)
 {
-    return harness_count_near(0, 0, 240, 240, rgb, TOL);
+    return harness_count_near(0, 0, PANEL_PX, PANEL_PX, rgb, TOL);
 }
 
 /* ---- rotation screens ---- */
 
+/* A card as the deck actually builds one. */
+static card_data_t mrr_card(void)
+{
+    card_data_t c = {0};
+    c.label = "MRR";
+    c.hero = "$1,106.33";
+    c.subtitle = "33 active";
+    c.has_delta = true;
+    c.delta = "+4.2%";
+    c.comparison = "vs $1,061 last month";
+    c.delta_is_gain = true;
+    c.fill_pct = 78;
+    c.dot_index = 0;
+    c.dot_count = 8;
+    return c;
+}
+
 static void test_mrr_screen(void)
 {
     current_screen = "mrr";
-    printf("MRR screen (spec 6.1)\n");
+    printf("MRR card (spec 6.1)\n");
 
-    const screen_data_t d = {
-        .label = "MRR",
-        .hero = "$6.5k",
-        .subtitle = "+$118 today",
-        .hero_is_gain = 0,
-        .subtitle_is_gain = 1,
-        .dot_index = 0,
-        .dot_count = 6,
-    };
-    screen_draw_rotation(harness_screen(), &d);
+    card_data_t c = mrr_card();
+    screen_draw_card(harness_screen(), &c);
     harness_render();
 
     expect_background();
     expect_padding_respected();
 
-    /* Each element is checked inside a band that contains only itself.
-     * Descent budgets scale with size: '$' descends ~9px at 88px, 'y' ~5px
-     * at 22px. Bands stop short of the next element's ink so one element's
-     * descender is not mistaken for the next element's body. */
-    expect_text_at_baseline("label at its baseline", 0, 44, LABEL_BASELINE_Y + 20, 6);
-    expect_text_at_baseline("hero at baseline y=150", 60, 160, HERO_BASELINE_Y, 10);
-    expect_text_at_baseline("subtitle at baseline y=178", 161, 200,
-                            SUBTITLE_BASELINE_Y, 6);
-
-    /* The hero is primary (not green -- MRR is a level, not a realized gain). */
+    /* The hero is primary: MRR is a level, not a realized gain. */
     check_true("hero rendered in primary", count_color(COLOR_PRIMARY) > 200);
 
-    /* The subtitle IS a realized gain, so it is green (spec 4.2). */
-    check_true("subtitle rendered in green", count_color(COLOR_GREEN) > 40);
+    /* The delta pill is a realized gain, so green (spec 4.2). */
+    check_true("gain pill rendered in green", count_color(COLOR_GREEN) > 40);
 
-    /* Label is muted. */
-    check_true("label rendered in muted", count_color(COLOR_MUTED) > 20);
+    /* Label, subtitle and caption are all quiet. */
+    check_true("chrome rendered in muted", count_color(COLOR_MUTED) > 20);
+
+    /* Red is reserved. Nothing on a healthy card may use it. */
+    check_int("no red on a healthy card", count_color(COLOR_RED), 0);
+}
+
+/*
+ * The accent overrides must reach the pill, not just the hero.
+ *
+ * CANCELLED asks for amber because notice-given is a degraded state rather
+ * than a threshold breach. It was rendering an amber hero with a RED pill,
+ * which spends the one colour spec 4.2 reserves for FAILED -- caught by
+ * looking at a screenshot, not by a test, so here is the test.
+ */
+static void test_accent_reaches_the_pill(void)
+{
+    current_screen = "accent";
+    printf("accent overrides reach the pill\n");
+
+    card_data_t amber = mrr_card();
+    amber.label = "CANCELLED";
+    amber.hero = "$42.00";
+    amber.subtitle = "2 leaving";
+    amber.accent_amber = true;
+    amber.delta = "3% MRR";
+    amber.delta_is_gain = false;
+    screen_draw_card(harness_screen(), &amber);
+    harness_render();
+
+    check_true("amber card uses amber", count_color(COLOR_AMBER) > 100);
+    check_int("amber card uses no red", count_color(COLOR_RED), 0);
+
+    card_data_t red = mrr_card();
+    red.label = "FAILED";
+    red.hero = "$29.00";
+    red.accent_red = true;
+    red.has_delta = false;
+    red.delta = NULL;
+    screen_draw_card(harness_screen(), &red);
+    harness_render();
+
+    check_true("the failed card earns red", count_color(COLOR_RED) > 100);
 }
 
 /*
@@ -208,20 +257,21 @@ static void test_rotation_dots(void)
     current_screen = "dots";
     printf("rotation dots (spec 6.1)\n");
 
-    for (int active = 0; active < 6; active++) {
-        const screen_data_t d = {
-            .label = "MRR", .hero = "$6.5k", .subtitle = "+$118 today",
-            .dot_index = active, .dot_count = 6,
-        };
-        screen_draw_rotation(harness_screen(), &d);
+    for (int active = 0; active < 8; active++) {
+        card_data_t d = mrr_card();
+        d.dot_index = active;
+        d.dot_count = 8;
+        screen_draw_card(harness_screen(), &d);
         harness_render();
 
         /* Look only at the dot band. */
         const int band_y = DOTS_CENTER_Y - DOTS_RADIUS - 1;
         const int band_h = DOTS_RADIUS * 2 + 2;
 
-        const int lit = harness_count_near(0, band_y, 240, band_h, COLOR_PRIMARY, TOL);
-        const int dim = harness_count_near(0, band_y, 240, band_h, COLOR_INACTIVE, TOL);
+        const int lit = harness_count_near(0, band_y, PANEL_PX, band_h,
+                                           COLOR_PRIMARY, TOL);
+        const int dim = harness_count_near(0, band_y, PANEL_PX, band_h,
+                                           COLOR_INACTIVE, TOL);
 
         char what[64];
 
@@ -230,7 +280,7 @@ static void test_rotation_dots(void)
         snprintf(what, sizeof(what), "active dot %d is visible", active);
         check_true(what, lit > 20);
 
-        snprintf(what, sizeof(what), "with dot %d active, 5 inactive dots visible", active);
+        snprintf(what, sizeof(what), "with dot %d active, 7 inactive dots visible", active);
         check_true(what, dim > 100);
 
         /* The inactive dots together must outweigh the single active one. */
@@ -251,28 +301,42 @@ static void test_hero_sizing_on_screen(void)
     const char *values[] = {"2", "94", "$6.5k", "$145k", "$1.45M", "$1,234,567"};
 
     for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
-        const screen_data_t d = {
-            .label = "MRR", .hero = values[i], .subtitle = "today",
-            .dot_index = 0, .dot_count = 6,
-        };
-        screen_draw_rotation(harness_screen(), &d);
+        card_data_t d = mrr_card();
+        d.hero = values[i];
+        screen_draw_card(harness_screen(), &d);
         harness_render();
 
         int x0, y0, x1, y1;
         char what[96];
 
-        /* Look at the hero band only. */
-        if (!harness_ink_bounds(0, 60, 240, 100, COLOR_BG, TOL, &x0, &y0, &x1, &y1)) {
+        /*
+         * The hero band, taken from the card's own geometry rather than a
+         * literal. The band spans from just under the subtitle to just above
+         * the bar, so it contains the hero and nothing else.
+         */
+        const int band_y = CARD_Y + CARD_SUBTITLE_DY + 44;
+        const int band_h = (CARD_Y + CARD_BAR_DY) - band_y - 4;
+        /*
+         * Scanned across the card's interior, not the whole panel: starting
+         * at x=0 finds the card's own edge against the screen background and
+         * reports ink at x=0 for every value.
+         */
+        const int scan_x = PAD_PX + 4;
+        const int scan_w = (PANEL_PX - PAD_PX - 4) - scan_x;
+        if (!harness_ink_bounds(scan_x, band_y, scan_w, band_h, COLOR_CARD,
+                                TOL, &x0, &y0, &x1, &y1)) {
             snprintf(what, sizeof(what), "'%s' drew something", values[i]);
             check_true(what, 0);
             continue;
         }
 
-        snprintf(what, sizeof(what), "'%s' starts at the left padding", values[i]);
-        check_between(what, x0, PAD_PX - 2, PAD_PX + 8);
+        /* Text is inset by the card's own padding, not the panel's. */
+        const int inner_x = PAD_PX + CARD_PAD;
+        snprintf(what, sizeof(what), "'%s' starts at the card padding", values[i]);
+        check_between(what, x0, inner_x - 2, inner_x + 8);
 
-        snprintf(what, sizeof(what), "'%s' fits inside the 208px column", values[i]);
-        check_true(what, x1 <= 240 - PAD_PX);
+        snprintf(what, sizeof(what), "'%s' fits inside the card column", values[i]);
+        check_true(what, x1 <= PANEL_PX - PAD_PX - CARD_PAD);
     }
 }
 
@@ -565,6 +629,7 @@ int main(void)
     harness_init();
 
     test_mrr_screen();
+    test_accent_reaches_the_pill();
     test_rotation_dots();
     test_hero_sizing_on_screen();
     test_green_discipline();

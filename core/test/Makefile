@@ -68,12 +68,20 @@ test_screens: test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
 # Not part of `make` or the suite -- it asserts nothing.
 mock_mrr: mock_mrr.c harness.c ../src/hero_size.c ../src/baseline.c \
           $(FONT_SRCS) lv_conf.h $(DEPS)
-	$(CC) $(LV_CFLAGS) -DHARNESS_W=480 -DHARNESS_H=480 \
+	$(CC) $(LV_CFLAGS) \
 	  -o $@ mock_mrr.c harness.c ../src/screens.c ../src/hero_size.c \
 	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
 
 test_invoices: test_invoices.c ../src/invoices.c ../include/invoices.h
 	$(CC) $(CFLAGS) -o $@ test_invoices.c ../src/invoices.c
+
+# Screenshots for the README. Drives the real renderers at 480x480 with the
+# real fonts, so the images cannot drift from the code.
+render_docs: render_docs.c harness.c ../src/screens.c ../src/hero_size.c \
+             ../src/baseline.c $(FONT_SRCS) lv_conf.h $(DEPS)
+	$(CC) $(LV_CFLAGS) \
+	  -o $@ render_docs.c harness.c ../src/screens.c ../src/hero_size.c \
+	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
 
 quick: $(LOGIC_BINS)
 	@fail=0; for t in $(LOGIC_BINS); do ./$$t || fail=1; echo; done; exit $$fail

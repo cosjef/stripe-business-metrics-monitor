@@ -4,6 +4,36 @@ Firmware for a single-purpose desk instrument that shows live Stripe revenue
 metrics. It answers one question at a time, in numbers readable across a room,
 and talks to nothing except the Stripe API.
 
+## The deck
+
+Eight screens, five seconds each. A screen with nothing to say hides itself,
+so the rotation is only ever as long as the account warrants.
+
+| | | |
+|:--:|:--:|:--:|
+| ![MRR](docs/img/mrr.png) | ![New paid](docs/img/new_paid.png) | ![Paid subs](docs/img/paid_subs.png) |
+| **MRR** — the anchor, with its 30-day trend | **NEW PAID** — signups, and whether they are speeding up | **PAID SUBS** — the flow behind the count |
+| ![Cancelled](docs/img/cancelled.png) | ![ARR](docs/img/arr.png) | ![ARPU](docs/img/arpu.png) |
+| **CANCELLED** — revenue that gave notice but has not left | **ARR** — the annual figure, in annual units | **ARPU** — are the customers won worth more than those lost |
+| ![Net 30d](docs/img/net_30d.png) | ![Failed](docs/img/failed.png) | ![Stale](docs/img/stale.png) |
+| **NET 30D** — what the month did to revenue | **FAILED** — the only screen that earns red | **stale** — shown instead of a figure it can no longer vouch for |
+
+The screenshots are rendered from the firmware itself, at the panel's real
+480x480 with the real fonts, by `core/test/render_docs`. They cannot drift
+from what the device draws.
+
+A few of the decisions they show:
+
+- **A count is not a story.** "33 subscribers" reads the same whether the
+  month added three or added ten and lost seven. PAID SUBS shows the flow;
+  NET 30D shows what it did to the money.
+- **Green means realized gain, and nothing else.** Amber is a degraded state,
+  red is a threshold breach that can still be acted on. FAILED is the only
+  screen that earns red.
+- **The device does not guess.** A trend needs seven daily samples before it
+  is drawn, an ARPU comparison needs six customers on each side, and a figure
+  it cannot vouch for is shown as stale rather than presented as current.
+
 ## Layout
 
 ```
@@ -13,7 +43,7 @@ docs/           the spec, the port plan, and the hardware notes
 ```
 
 Nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
-`freertos/*`. That single constraint is what lets 1,403 checks run on a laptop
+`freertos/*`. That single constraint is what lets 1,520 checks run on a laptop
 with no hardware and no SDK. See [core/README.md](core/README.md).
 
 ## Status
@@ -56,7 +86,7 @@ make
 for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-1,403 checks across 25 suites. Most cover pure logic — text measurement, hero
+1,520 checks across 25 suites. Most cover pure logic — text measurement, hero
 auto-sizing, MRR arithmetic, the streaming JSON scanners, rotation rules,
 freshness, battery thresholds, WiFi retry policy. One boots real LVGL against
 an offscreen framebuffer and asserts on actual pixels.
@@ -67,6 +97,16 @@ from the PlatformIO dependency: `cd firmware-c6 && pio pkg install`.
 Panel bring-up, the radios and the I2C peripherals are not covered — they need
 real hardware, and every claim about them in the docs was checked against a
 register read rather than a datasheet.
+
+## Regenerating the screenshots
+
+The README's images come from the firmware, not from a drawing tool. After any
+layout change:
+
+```sh
+cd core/test && make render_docs && ./render_docs
+../../docs/img/build.sh          # needs ImageMagick
+```
 
 ## Regenerating fonts
 

@@ -757,7 +757,16 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
         lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(accent), 0);
         lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_BG), 0);
     } else if (data->has_delta) {
-        const uint32_t accent = data->delta_is_gain ? COLOR_GREEN : COLOR_RED;
+        /*
+         * The accent overrides win. A card that asked for amber means a
+         * degraded state, not a threshold breach, and its pill must not be
+         * red -- CANCELLED set accent_amber for its hero and still got a red
+         * pill, which spends the one colour spec 4.2 reserves for FAILED.
+         */
+        const uint32_t accent = data->accent_red   ? COLOR_RED
+                              : data->accent_amber ? COLOR_AMBER
+                              : data->delta_is_gain ? COLOR_GREEN
+                              : COLOR_RED;
 
         lv_label_set_text(s_card.pill, data->delta);
         lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(accent), 0);
@@ -777,10 +786,20 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
         lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
     } else {
-        /* Muted pill on the track colour, and no fill at all. */
-        lv_label_set_text(s_card.pill, "--");
-        lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(COLOR_TRACK), 0);
-        lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_DIM), 0);
+        /*
+         * No delta to show. The muted "--" means "a trend is coming, there is
+         * not enough history yet" -- so it belongs only on a card that HAS a
+         * trend to collect. A card with no delta at all, like FAILED, showed
+         * a placeholder for a figure it will never have.
+         */
+        if (data->comparison != NULL && data->delta != NULL) {
+            lv_label_set_text(s_card.pill, "--");
+            lv_obj_set_style_bg_color(s_card.pill, lv_color_hex(COLOR_TRACK), 0);
+            lv_obj_set_style_text_color(s_card.pill, lv_color_hex(COLOR_DIM), 0);
+            lv_obj_clear_flag(s_card.pill, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_add_flag(s_card.pill, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_add_flag(s_card.fill, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_card.fill2, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);

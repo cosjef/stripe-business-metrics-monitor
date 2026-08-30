@@ -32,7 +32,7 @@ static const int ui_sizes[] = {SIZE_FOOTER, SIZE_LABEL, SIZE_SUBTITLE};
 static int font_file_exists(int size)
 {
     char path[256];
-    snprintf(path, sizeof(path), "../include/fonts/stripe_sans_%d.c", size);
+    snprintf(path, sizeof(path), "../fonts/stripe_sans_%d.c", size);
     FILE *f = fopen(path, "r");
     if (f) {
         fclose(f);
@@ -49,7 +49,7 @@ static int font_declares_symbol(int size)
 {
     char path[256];
     char needle[64];
-    snprintf(path, sizeof(path), "../include/fonts/stripe_sans_%d.c", size);
+    snprintf(path, sizeof(path), "../fonts/stripe_sans_%d.c", size);
     snprintf(needle, sizeof(needle), "stripe_sans_%d", size);
 
     FILE *f = fopen(path, "r");
