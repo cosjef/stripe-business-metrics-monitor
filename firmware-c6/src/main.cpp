@@ -46,6 +46,7 @@ extern "C" {
 #include "provision.h"
 #include "rotation.h"
 #include "state.h"
+#include "wifi_retry.h"
 #include "screens.h"
 #include "stripe_key.h"
 }
@@ -69,6 +70,7 @@ extern "C" {
  * router. 0 disables. Must be 0 in anything shipped.
  */
 #define FORCE_STALE_AFTER_S 0
+
 
 #define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
 #define NTP_SERVER_1 "pool.ntp.org"
@@ -168,6 +170,18 @@ static bool s_auth_failed;
  * screen exists to prevent.
  */
 static bool s_from_cache;
+
+/*
+ * Reconnection state.
+ *
+ * The Arduino core's auto-reconnect is not enough on its own: it is cleared by
+ * an explicit disconnect, and it carries no policy about when to stop trying.
+ * Measured on hardware -- after a disconnect the status sat at WL_DISCONNECTED
+ * for seventy-five seconds and never recovered, which is what a router reboot
+ * would do to a device on a desk.
+ */
+static wifi_retry_t s_retry;
+static uint32_t s_next_retry_ms;
 
 /* Latest battery reading, refreshed on the rotation tick. */
 static battery_reading_t s_battery;
@@ -1059,6 +1073,7 @@ static bool join_wifi(const char *ssid, const char *pass, uint32_t timeout_ms)
     while (millis() < deadline) {
         if (WiFi.status() == WL_CONNECTED) {
             Serial.printf("OK: wifi %s\n", WiFi.localIP().toString().c_str());
+            wifi_retry_on_connected(&s_retry);
             return true;
         }
         delay(20);
@@ -1202,6 +1217,7 @@ static void refresh(void)
      * that, and the first fetch runs before the first tick, so logging the
      * cached value printed 0 mV on boot. */
     battery_hw_read(&s_battery);
+    Serial.printf("wifi: rssi=%d\n", (int)WiFi.RSSI());
     Serial.printf("battery: %d mV, %s\n", s_battery.cell_mv,
                   s_battery.charging ? "charging" : "on cell");
     Serial.printf("new paid pace: this=%d prior=%d\n",
@@ -1354,6 +1370,7 @@ void setup(void)
      * correct fresh-device state -- no samples, no trend, and the card says
      * it is collecting.
      */
+    wifi_retry_init(&s_retry);
     history_init(&s_history);
     if (settings_load_history(&s_history, sizeof(s_history))) {
         Serial.printf("history: restored %d sample(s)\n",
@@ -1542,6 +1559,37 @@ void loop(void)
         portal_tick();
         delay(2);
         return;
+    }
+
+    /*
+     * Reconnect on our own schedule rather than trusting the core.
+     *
+     * The policy is in wifi_retry.c: a device that has never joined gives up
+     * after five attempts so a wrong password surfaces on screen instead of
+     * retrying forever behind a blank display, and a device that HAS joined
+     * never gives up, because a later disconnect means the network is down
+     * rather than the credentials being wrong. A router reboot must not
+     * permanently disable a desk instrument.
+     */
+    if (WiFi.status() != WL_CONNECTED) {
+        if (s_retry.consecutive_fails == 0) {
+            wifi_retry_on_disconnect(&s_retry);
+            s_next_retry_ms = now + wifi_retry_delay_ms(&s_retry);
+            Serial.println("wifi: lost, will retry");
+        } else if (now >= s_next_retry_ms &&
+                   wifi_retry_should_reconnect(&s_retry)) {
+            char ssid[SETTINGS_SSID_LEN], pass[SETTINGS_PASS_LEN];
+            if (settings_get_wifi(ssid, sizeof(ssid), pass, sizeof(pass))) {
+                Serial.printf("wifi: reconnecting (attempt %d)\n",
+                              s_retry.consecutive_fails);
+                WiFi.begin(ssid, pass);
+            }
+            wifi_retry_on_disconnect(&s_retry);
+            s_next_retry_ms = now + wifi_retry_delay_ms(&s_retry);
+        }
+    } else if (s_retry.consecutive_fails > 0) {
+        wifi_retry_on_connected(&s_retry);
+        Serial.println("wifi: reconnected");
     }
 
     if (now - last_rotate >= ROTATE_MS) {
