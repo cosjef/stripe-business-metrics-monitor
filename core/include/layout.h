@@ -8,21 +8,13 @@
 #pragma once
 
 /*
- * Geometry is selected by target.
+ * Geometry for the 480x480 AMOLED.
  *
- * The S3 values are the originals, traceable to the spec and verified on that
- * panel. The C6 values are derived in geometry.c from physical size rather
- * than scaled by pixel count -- the C6 has 2x the pixels but only 1.4x the
- * physical size, so type must grow ~1.43x to stay the same number of
- * millimetres, while positions grow 2x to keep the composition. See
- * layout_c6.h and test_layout_c6.c.
- */
-/*
- * BOARD_C6_AMOLED_216 is the Arduino/PlatformIO port's selector. That build
- * has no sdkconfig.h, so CONFIG_IDF_TARGET_ESP32C6 is never defined and the
- * C6 would silently fall through to the S3 ladder -- every size and baseline
- * wrong by the density ratio, on a panel that would still render happily.
- * Both builds must land on the same constants; see arduino/platformio.ini.
+ * The values are derived in geometry.c from physical size rather than picked
+ * by eye: spec 2.2 states its legibility floor in millimetres at 50cm, so
+ * type is sized to hold a real-world height on this panel's ~314 PPI while
+ * positions scale proportionally to keep the composition. test_layout_c6.c
+ * checks that derivation against the 240x240 panel these values came from.
  */
 #include "layout_c6.h"
 

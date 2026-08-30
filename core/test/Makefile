@@ -9,7 +9,7 @@
 # firmware/ first if it is missing.
 
 CC      ?= cc
-CFLAGS  := -std=c11 -Wall -Wextra -Werror -g -O0 -I ../include -DBOARD_C6_AMOLED_216
+CFLAGS  := -std=c11 -Wall -Wextra -Werror -g -O0 -I ../include
 
 LVGL    := ../../firmware-c6/.pio/libdeps/c6_amoled/lvgl
 
@@ -27,7 +27,7 @@ FONT_SRCS := $(wildcard ../fonts/stripe_sans_*.c) ../fonts/fonts.c
 
 # LVGL and the generated fonts are third-party or machine-written; -Werror on
 # our own code, quiet for theirs.
-LV_CFLAGS := -std=c11 -w -O0 -DBOARD_C6_AMOLED_216 -I . -I ../include -I ../fonts \
+LV_CFLAGS := -std=c11 -w -O0 -I . -I ../include -I ../fonts \
              -I $(LVGL) -I $(LVGL)/src -DLV_CONF_INCLUDE_SIMPLE
 
 DEPS := ../include/hero_size.h ../include/layout.h ../include/baseline.h
@@ -68,7 +68,7 @@ test_screens: test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
 # Not part of `make` or the suite -- it asserts nothing.
 mock_mrr: mock_mrr.c harness.c ../src/hero_size.c ../src/baseline.c \
           $(FONT_SRCS) lv_conf.h $(DEPS)
-	$(CC) $(LV_CFLAGS) -DHARNESS_W=480 -DHARNESS_H=480 -DBOARD_C6_AMOLED_216 \
+	$(CC) $(LV_CFLAGS) -DHARNESS_W=480 -DHARNESS_H=480 \
 	  -o $@ mock_mrr.c harness.c ../src/screens.c ../src/hero_size.c \
 	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
 
