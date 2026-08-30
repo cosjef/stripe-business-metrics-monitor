@@ -202,22 +202,21 @@ terminal after installing, then run `pio --version` again.
 The device reads your Stripe account and sends that data nowhere else. There
 is no telemetry, no analytics, and no server belonging to this project.
 
-There is one request to someone other than Stripe. To roll the daily
-history over at your midnight rather than someone else's, the device asks
-[ip-api.com](https://ip-api.com) for the UTC offset of its own address. It
-sends nothing but the connection itself, no Stripe data is involved, and
-the answer is cached and re-checked once a day so a daylight-saving change
-is picked up. If the lookup fails the device falls back to US Eastern and
-carries on, so blocking that host costs you a correct day boundary and
+It makes one request to anyone other than Stripe. To know when your day ends,
+it asks [ip-api.com](https://ip-api.com) for the UTC offset of its own
+address, once a day. That request carries no Stripe data. Block it and the
+device falls back to US Eastern, which costs you a correct day boundary and
 nothing else.
 
-Two things worth knowing before you set one up in a busy place: the setup
-network is open and the key page is plain HTTP, so during those few minutes
-someone in radio range could capture your Wi-Fi password and the Stripe key.
-Once setup finishes, all Stripe traffic runs over TLS against a pinned
-certificate. The stored key is unencrypted on the board, which is a
-deliberate trade, because a read-only restricted key leaks a subscriber
-count, not the ability to move money.
+Setup is the weak point. For those few minutes the device runs an open
+network and serves the key page over plain HTTP, so someone in radio range
+could capture your Wi-Fi password and your Stripe key. Do it somewhere
+quiet. After that, every request to Stripe is TLS against a pinned
+certificate.
+
+The key is stored unencrypted on the board. That is a deliberate trade: a
+read-only restricted key can reveal your subscriber count, but it cannot
+move money.
 
 ## For developers
 
