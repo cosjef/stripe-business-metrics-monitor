@@ -27,8 +27,9 @@ Stripe API and to nothing else.
 
 There is no soldering and no enclosure to print. You buy a Waveshare
 ESP32-C6 board, flash it over USB, and finish setup on your phone over WiFi.
-If you have never written firmware before, that is fine, because this page
-assumes you have not.
+You do not write any firmware. Clone this repository, run the upload
+command, and you are done with the computer; there is nothing to edit and no
+credentials to paste into a file before you flash.
 
 ## What it shows
 
