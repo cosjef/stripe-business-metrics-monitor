@@ -412,6 +412,32 @@ feed for it.
 
 `events.c` keeps its 58 checks and costs nothing sitting unwired.
 
+## A stale screen is not a wipe
+
+Symptom: after a reflash the device showed the "Join wifi" setup screen even
+though it was fully provisioned, which reads exactly like NVS having been
+erased.
+
+It was not. `pio run -t upload` writes only the app partition, so credentials,
+the cache and the daily history all survive a reflash -- the boot log proves
+it, with `cache: restored` and `history: restored N sample(s)` above a
+successful fetch.
+
+The real cause was drawing order. The panel holds whatever was last rendered,
+and the deck was not drawn until AFTER the WiFi join, ten to fifteen seconds
+in. Whatever had been on the glass before stayed there for that whole window,
+and on a device that had once been in setup mode, that was the setup screen.
+
+The fix is to draw immediately after `restore_cache()`, which is where the
+values become available. What made this hard to see was a comment at the old
+draw site claiming that point was "the earliest the deck can be drawn with
+real numbers" -- it was not, the cache is restored forty lines earlier. The
+comment asserted a constraint that did not exist and was believed.
+
+When a device appears to have lost its settings, read the boot log before
+reflashing anything. `cache: restored` and `joining <ssid>` mean the NVS is
+intact and the problem is on the glass.
+
 ## Still open
 
 - The layouts were designed and judged while the panel was rotated 90 degrees.

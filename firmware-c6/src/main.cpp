@@ -1459,6 +1459,26 @@ void setup(void)
      */
     const bool had_cache = restore_cache();
 
+    /*
+     * Draw immediately, before the network.
+     *
+     * restore_cache() has already populated the values, so the deck can go up
+     * now -- and it must, because WiFi association takes ten to fifteen
+     * seconds and whatever was on the panel beforehand stays there until
+     * something replaces it. That left a stale setup screen visible on a
+     * fully provisioned device, which reads as though the credentials were
+     * lost.
+     *
+     * A later comment claimed the post-join point was "the earliest the deck
+     * can be drawn with real numbers". It was not: the cache is restored
+     * forty lines above it.
+     */
+    if (had_cache) {
+        s_mode = MODE_RUNNING;
+        show(0);
+        lv_timer_handler();
+    }
+
     /* Decide the mode from what is actually stored. */
     char ssid[SETTINGS_SSID_LEN];
     char pass[SETTINGS_PASS_LEN];
@@ -1491,16 +1511,6 @@ void setup(void)
         return;
     }
 
-    /*
-     * Show the cached values now, before the fetch.
-     *
-     * join_wifi already ran, so this is the earliest point the deck can be
-     * drawn with real numbers rather than dashes.
-     */
-    if (had_cache) {
-        s_mode = MODE_RUNNING;
-        show(0);
-    }
 
     /* Clock before the first fetch, so that fetch can be bucketed. */
     sync_clock();
