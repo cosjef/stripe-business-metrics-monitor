@@ -124,6 +124,19 @@ advance table in `core/src/hero_size.c`:
 
 Otherwise text sizing will silently disagree with what LVGL renders.
 
+## Known limitations
+
+- **The timezone is hardcoded** to `EST5EDT` in `firmware-c6/src/main.cpp`.
+  It decides when the daily history rolls over, so anywhere outside US Eastern
+  the day boundary lands at the wrong hour. Change `DEVICE_TZ` before
+  flashing.
+- **NVS is unencrypted.** A deliberate trade: the stored key is read-only and
+  restricted, so it leaks a subscriber count rather than the ability to move
+  money.
+
+[docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
+and what is deliberately not built.
+
 ## Notable deviations from the spec
 
 Findings from real hardware that contradict the written spec:
