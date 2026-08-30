@@ -6,27 +6,27 @@ you today.
 
 ![MRR](docs/img/mrr.png)
 
-It cycles through eight screens, five seconds each, in numbers you can read
+It cycles through eight screens, five seconds each, with numbers you can read
 from across the room:
 
-**What you are making.** Monthly recurring revenue with a 30-day trend line,
-the same figure as an annual run rate, and the average revenue per
-subscriber.
+**What you're making.** Monthly recurring revenue and its 30-day trend,
+annual run rate, and average revenue per subscriber.
 
-**Who is arriving and who is leaving.** New paid signups and whether they are
-speeding up or slowing down. The subscribers you gained against the ones you
-lost. Revenue that has given notice but has not left yet.
+**Who's arriving and leaving.** New paid signups and whether they're
+accelerating or slowing. Subscribers gained versus lost. Revenue that's been
+canceled but hasn't churned yet.
 
-**What the month actually did.** The net effect on revenue over 30 days, so
-growth and churn land as one number instead of two you have to reconcile.
+**What the month actually did.** The net change in revenue over the past 30
+days, combining growth and churn into one number.
 
-**What needs you today.** Failed payments, with what they are worth and when
-Stripe next retries them.
+**What needs your attention.** Failed payments, how much revenue is at risk,
+and when Stripe will retry them.
 
-No app, no dashboard, no browser tab you forget to open, and your revenue
-data goes to Stripe and nowhere else. There is no soldering and no enclosure
-to print: you buy a Waveshare ESP32-C6 board, flash it over USB, and finish
-setup on your phone over WiFi. You do not write any firmware.
+No app. No dashboard. No browser tab you forget to open. Your revenue data
+goes to Stripe and nowhere else.
+
+There's nothing to solder and no firmware to write. Buy a Waveshare ESP32-C6
+board, flash it over USB, then finish setup from your phone over Wi-Fi.
 
 ## What it shows
 
@@ -129,7 +129,7 @@ flash, and no secret ends up in the binary.
 
 ### 4. Join the setup network
 
-When the board comes up with nothing stored, it starts its own WiFi network
+When the board comes up with nothing stored, it starts its own Wi-Fi network
 and shows the name on the panel:
 
 ![Setup](docs/img/setup.png)
@@ -138,16 +138,16 @@ On your phone, join that open network, named `Setup-` followed by four
 characters from the board's ID. A setup page should open by itself. If it does not,
 browse to **http://192.168.4.1/**.
 
-### 5. Give it your WiFi and your key
+### 5. Give it your Wi-Fi and your key
 
-The page asks for your home WiFi first. The device joins your network, then
+The page asks for your home Wi-Fi first. The device joins your network, then
 comes back and asks for the Stripe key from step 2.
 
 Paste the key and submit. It is checked against the live Stripe API before it
 is saved, so a wrong key fails while you are still holding the phone rather
 than leaving you with a dead panel.
 
-When it succeeds the deck appears, and setup is done. Both the WiFi
+When it succeeds the deck appears, and setup is done. Both the Wi-Fi
 credentials and the key are stored on the board and survive a reflash, so
 this is a one-time step.
 
@@ -166,7 +166,7 @@ device would rather show less than guess.
 else. Amber is a degraded state. Red is a threshold worth acting on, and the
 FAILED screen is the only one that earns it.
 
-**It keeps the last good numbers.** If WiFi drops or Stripe is unreachable,
+**It keeps the last good numbers.** If Wi-Fi drops or Stripe is unreachable,
 the deck marks itself stale instead of blanking or lying.
 
 ## Troubleshooting
@@ -216,7 +216,7 @@ nothing else.
 
 Two things worth knowing before you set one up in a busy place: the setup
 network is open and the key page is plain HTTP, so during those few minutes
-someone in radio range could capture your WiFi password and the Stripe key.
+someone in radio range could capture your Wi-Fi password and the Stripe key.
 Once setup finishes, all Stripe traffic runs over TLS against a pinned
 certificate. The stored key is unencrypted on the board, which is a
 deliberate trade, because a read-only restricted key leaks a subscriber
