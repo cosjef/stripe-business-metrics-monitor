@@ -208,11 +208,10 @@ address, once a day. That request carries no Stripe data. Block it and the
 device falls back to US Eastern, which costs you a correct day boundary and
 nothing else.
 
-Setup is the weak point. For those few minutes the device runs an open
-network and serves the key page over plain HTTP, so someone in radio range
-could capture your Wi-Fi password and your Stripe key. Do it somewhere
-quiet. After that, every request to Stripe is TLS against a pinned
-certificate.
+Setup runs unencrypted. For those few minutes the device serves an open
+network and a plain HTTP key page, so someone in radio range could capture
+your Wi-Fi password and your Stripe key. Do it somewhere quiet. After that,
+every request to Stripe is TLS against a pinned certificate.
 
 The key is stored unencrypted on the board. That is a deliberate trade: a
 read-only restricted key can reveal your subscriber count, but it cannot
@@ -279,9 +278,8 @@ silent: every init step still reports success because nothing is listening.
 
 - **NVS is unencrypted**, and **provisioning is unencrypted**. Both are
   covered under "The numbers are yours" above.
-
-[docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
-and what is deliberately not built.
+- [docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full
+  list, and what is deliberately not built.
 
 ## License
 
