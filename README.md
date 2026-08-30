@@ -4,10 +4,10 @@ A small desktop device that shows your business health at a glance. It lives
 in your peripheral vision, so the numbers find you instead of the other way
 around.
 
-![MRR](docs/img/mrr.png)
-
 It cycles through eight screens, five seconds each, with numbers you can read
-from across the room:
+from across the room.
+
+![MRR](docs/img/mrr.png)
 
 **What you're making:** Monthly recurring revenue and its 30-day trend,
 annual run rate, and average revenue per subscriber.
