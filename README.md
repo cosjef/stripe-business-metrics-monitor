@@ -1,98 +1,201 @@
 # Stripe Revenue Display
 
-Firmware for a single-purpose desk instrument that shows live Stripe revenue
-metrics. It answers one question at a time, in numbers readable across a room,
-and talks to nothing except the Stripe API.
+A small desk instrument that shows your live Stripe revenue. It sits on a
+shelf, cycles through eight screens, and answers one question at a time in
+numbers you can read from across the room.
 
-## The deck
+![MRR](docs/img/mrr.png)
 
-Eight screens, five seconds each. A screen with nothing to say hides itself,
-so the rotation is only ever as long as the account warrants. The ninth tile
-below is not a screen but a state -- what the deck shows when it can no longer
-vouch for a figure.
+No app, no dashboard, no browser tab you forget to open. It talks to the
+Stripe API and to nothing else.
+
+There is no soldering and no enclosure to print. You buy one board, flash it
+over USB, and finish the setup on your phone. If you have never written
+firmware before, that is fine — this page assumes you have not.
+
+## What it shows
+
+Eight screens, five seconds each. Tap the panel or press a button to move
+forward; a screen with nothing to say hides itself, so a young account sees a
+shorter loop than a mature one.
 
 | | | |
 |:--:|:--:|:--:|
 | ![MRR](docs/img/mrr.png) | ![New paid](docs/img/new_paid.png) | ![Paid subs](docs/img/paid_subs.png) |
-| **MRR** — the anchor, with its 30-day trend | **NEW PAID** — signups, and whether they are speeding up | **PAID SUBS** — the flow behind the count |
+| **MRR** — monthly recurring revenue, with its 30-day trend | **NEW PAID** — signups, and whether they are speeding up | **PAID SUBS** — the flow behind the count |
 | ![Cancelled](docs/img/cancelled.png) | ![ARR](docs/img/arr.png) | ![ARPU](docs/img/arpu.png) |
-| **CANCELLED** — revenue that gave notice but has not left | **ARR** — the annual figure, in annual units | **ARPU** — are the customers won worth more than those lost |
+| **CANCELLED** — revenue that gave notice but has not left yet | **ARR** — the annual figure, in annual units | **ARPU** — are the customers you win worth more than the ones you lose |
 | ![Net 30d](docs/img/net_30d.png) | ![Failed](docs/img/failed.png) | ![Stale](docs/img/stale.png) |
-| **NET 30D** — what the month did to revenue | **FAILED** — the only screen that earns red | **stale** — shown instead of a figure it can no longer vouch for |
+| **NET 30D** — what the month did to revenue | **FAILED** — payments that need a nudge | **stale** — what it shows instead of a number it cannot vouch for |
 
-The screenshots are rendered from the firmware itself, at the panel's real
-480x480 with the real fonts, by `core/test/render_docs`. They cannot drift
-from what the device draws.
+The last tile is not a screen but a state. If a fetch fails, the deck says so
+rather than leaving an old figure up looking current.
 
-A few of the decisions they show:
+These images are not mockups. They are rendered from the firmware itself, at
+the panel's real 480x480 with the real fonts, so they cannot drift from what
+the device draws.
 
-- **A count is not a story.** "33 subscribers" reads the same whether the
-  month added three or added ten and lost seven. PAID SUBS shows the flow;
-  NET 30D shows what it did to the money.
-- **Green means realized gain, and nothing else.** Amber is a degraded state,
-  red is a threshold breach that can still be acted on. FAILED is the only
-  screen that earns red.
-- **The device does not guess.** A trend needs seven daily samples before it
-  is drawn, an ARPU comparison needs six customers on each side, and a figure
-  it cannot vouch for is shown as stale rather than presented as current.
+## What you need
+
+**One board: the [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm).**
+It is a 2.16-inch 480x480 AMOLED with a touch layer, a battery connector and
+a USB-C port, all on one piece. Nothing else is required — the board is the
+device.
+
+**A USB-C cable** that carries data, not just power.
+
+**A Stripe account** with at least one active subscription. The device reads
+recurring revenue, so a one-off-payments account will show zeroes.
+
+**A computer** with Python 3 to run the flashing tool, on macOS, Linux or
+Windows.
 
 ## Setting one up
 
-Flash the board, then everything else happens on your phone. There are no
-credentials at build time and nothing to edit before flashing.
+### 1. Install PlatformIO
+
+Flashing needs [PlatformIO](https://platformio.org/install/cli), which is
+what compiles the firmware and copies it to the board:
+
+```sh
+pip install platformio
+```
+
+Check it worked:
+
+```sh
+pio --version
+```
+
+### 2. Create a Stripe restricted key
+
+In the Stripe dashboard, go to **Developers → API keys → Create restricted
+key**. Give it a name, then grant **Read** on exactly two resources:
+
+- **Subscriptions**
+- **Invoices**
+
+Leave everything else at *None*. The key will start with `rk_`.
+
+A key limited to those two read permissions cannot move money, refund
+anyone, or change a subscription. It can reveal your subscriber count and
+revenue, which is the whole point of the device.
+
+Keep the key on screen or paste it somewhere you can reach from your phone —
+you will need it in step 5, and Stripe only shows it once.
+
+### 3. Flash the board
+
+Plug the board into your computer, then:
+
+```sh
+git clone https://github.com/cosjef/stripe-desk-display.git
+cd stripe-desk-display/firmware-c6
+pio run -t upload
+```
+
+The first build downloads the toolchain and takes a few minutes. Later ones
+take about twenty seconds.
+
+If upload cannot find the board, name the port explicitly:
+
+```sh
+ls /dev/cu.usbmodem*            # macOS
+pio run -t upload --upload-port /dev/cu.usbmodem21101
+```
+
+No credentials go in at build time. There is nothing to edit before you
+flash, and no secret ends up in the binary.
+
+### 4. Join the setup network
+
+When the board comes up with nothing stored, it starts its own WiFi network
+and shows the name on the panel:
 
 ![Setup](docs/img/setup.png)
 
-1. **Power the board.** With nothing stored it comes up in setup mode and
-   starts an open access point named `Setup-XXXX`, where the suffix is derived
-   from the board's MAC. The panel shows the name.
-2. **Join that network** from a phone. The captive portal should open by
-   itself; if it does not, browse to `http://192.168.4.1/`.
-3. **Give it your WiFi.** The device joins your network and comes back with
-   the key page.
-4. **Paste a Stripe restricted key.** It is validated against the live API
-   before it is stored, so a bad key fails while you are still holding the
-   phone. On success the deck appears.
+On your phone, join that open network — `Setup-` followed by four characters
+from the board's ID. A setup page should open by itself. If it does not,
+browse to **http://192.168.4.1/**.
 
-Credentials live in NVS and survive a reflash, so this is a one-time step. To
-start over, erase the NVS partition:
+### 5. Give it your WiFi and your key
+
+The page asks for your home WiFi first. The device joins your network, then
+comes back and asks for the Stripe key from step 2.
+
+Paste the key and submit. It is checked against the live Stripe API before it
+is saved, so a wrong key fails while you are still holding the phone rather
+than leaving you with a dead panel.
+
+When it succeeds the deck appears, and setup is done. Both the WiFi
+credentials and the key are stored on the board and survive a reflash, so
+this is a one-time step.
+
+## Living with it
+
+**It polls every five minutes.** Fresh enough to feel live, gentle enough on
+the API.
+
+**Two screens need history before they say anything.** The MRR trend line
+needs seven daily samples, and the ARPU comparison needs six customers on
+each side before it will call one group better than the other. Until then
+those screens show the figure without the comparison. That is deliberate: the
+device would rather show less than guess.
+
+**Colour means something specific.** Green is a realized gain and nothing
+else. Amber is a degraded state. Red is a threshold worth acting on — the
+FAILED screen is the only one that earns it.
+
+**It keeps the last good numbers.** If WiFi drops or Stripe is unreachable,
+the deck marks itself stale instead of blanking or lying.
+
+## Troubleshooting
+
+**The panel is black right after flashing.** Give it a few seconds. The
+board brings up its own display power rails before the first draw, so there
+is a pause between the upload finishing and anything appearing.
+
+**No `Setup-` network appears.** The board only starts one when it has no
+stored credentials. If you have set it up before, erase its memory to start
+over:
 
 ```sh
-esptool --port /dev/cu.usbmodem<N> erase-region 0x9000 0x5000
+esptool --port /dev/cu.usbmodem21101 erase-region 0x9000 0x5000
 ```
 
-Two things a first run will not show you immediately: the MRR trend needs
-**seven daily samples** before it draws a sparkline, and the ARPU comparison
-needs **six customers on each side** before it will call one cohort better
-than the other. Until then those screens show the figure without the
-comparison, which is deliberate -- see "The device does not guess" above.
+**The setup page does not open when I join the network.** Browse to
+**http://192.168.4.1/** directly. Some phones suppress the automatic popup.
 
-## Hardware
+**"Stripe key rejected."** The key was reachable but Stripe refused it.
+Check it starts with `rk_`, was copied whole, and has Read on Subscriptions
+and Invoices.
 
-[Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm)
-— a 480x480 CO5300 AMOLED with capacitive touch, an AXP2101 PMIC, and a
-lithium cell. Nothing is soldered and no enclosure is required; the board is
-the device.
+**"Could not reach Stripe."** A network problem rather than a key problem.
+The device retries by itself every thirty seconds until the first fetch
+succeeds, so this often clears without help.
 
-Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h).
-Several contradict Waveshare's own example — `LCD_CS` is GPIO15, not the 5
-their ESP-IDF sample documents — and
-[docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records how each was established.
+**Screens are missing from the rotation.** That is intended. A screen with
+nothing to report hides itself — no failed payments means no FAILED screen.
 
-## The Stripe key
+**`pio: command not found`.** PlatformIO is not on your PATH. Open a new
+terminal after installing, then run `pio --version` again.
 
-The device asks for a **restricted key** (`rk_...`) during setup, and needs
-**Read** on Subscriptions and Invoices — nothing else. Create one in the
-Stripe dashboard under **Developers → API keys → Create restricted key**,
-grant those two read scopes, and leave every other permission at *None*.
+## The numbers are yours
 
-It never writes, and the key is validated against the live API before it is
-stored, so a wrong one fails while you are still holding your phone.
+The device reads your Stripe account and sends the data nowhere else. There
+is no telemetry, no analytics, and no server belonging to this project.
 
-A key with only those two read scopes cannot move money. It can reveal your
-subscriber count and revenue, which is what the device is for.
+Two things worth knowing before you set one up in a busy place: the setup
+network is open and the key page is plain HTTP, so during those few minutes
+someone in radio range could capture your WiFi password and the Stripe key.
+Once setup finishes, all Stripe traffic runs over TLS against a pinned
+certificate. The stored key is unencrypted on the board, which is a
+deliberate trade — a read-only restricted key leaks a subscriber count, not
+the ability to move money.
 
-## Layout
+## For developers
+
+The repository splits in two:
 
 ```
 core/           portable: rendering, MRR maths, parsers, fonts, tests
@@ -101,42 +204,10 @@ docs/           the spec, the port plan, and the hardware notes
 ```
 
 Nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
-`freertos/*`. That single constraint is what lets 1,518 checks run on a laptop
-with no hardware and no SDK. See [core/README.md](core/README.md).
+`freertos/*`. That single constraint is what lets 1,518 checks run on a
+laptop with no hardware and no SDK.
 
-## Status
-
-Working. The device provisions itself over a captive portal, stores
-credentials in NVS, fetches from Stripe over TLS with a pinned CA, and rotates
-eight screens: MRR, new paid, paid subs, cancelled, annual run rate, ARPU, net
-30-day, and failed payments. Screens with nothing to say hide themselves.
-Buttons and touch move the deck, the battery shows in the label row, and a
-failed fetch surfaces a stale screen rather than presenting old numbers as
-current.
-
-It was first attempted in ESP-IDF and never drove the panel past its opening
-frame. [docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records that failure, the
-bisect that could not find it, and the hardware facts that cost the most to
-establish -- several of which contradict Waveshare's own documentation.
-
-See [docs/stripe-revenue-display-spec.md](docs/stripe-revenue-display-spec.md)
-for the design this is built from.
-
-## Building
-
-```sh
-cd firmware-c6
-pio run
-pio run -t upload --upload-port /dev/cu.usbmodem<N>
-```
-
-No credentials at build time: the device provisions over its own access point.
-The serial port name changes between replugs -- check `ls /dev/cu.usbmodem*`
-first.
-
-## Tests
-
-Everything portable is tested on the host, with no hardware and no SDK:
+### Tests
 
 ```sh
 cd core/test
@@ -144,21 +215,21 @@ make
 for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-1,518 checks across 26 suites. Most cover pure logic — text measurement, hero
-auto-sizing, MRR arithmetic, the streaming JSON scanners, rotation rules,
-freshness, battery thresholds, WiFi retry policy. One boots real LVGL against
-an offscreen framebuffer and asserts on actual pixels.
+1,518 checks across 26 suites — text measurement, hero auto-sizing, MRR
+arithmetic, the streaming JSON scanners, rotation rules, freshness, battery
+thresholds, refresh scheduling. One boots real LVGL against an offscreen
+framebuffer and asserts on actual pixels.
 
-`make quick` skips the LVGL build and runs only the logic suites. LVGL comes
-from the PlatformIO dependency: `cd firmware-c6 && pio pkg install`.
+`make quick` skips the LVGL build. LVGL comes from the PlatformIO
+dependency: `cd firmware-c6 && pio pkg install`.
 
-Panel bring-up, the radios and the I2C peripherals are not covered — they need
-real hardware, and every claim about them in the docs was checked against a
-register read rather than a datasheet.
+Panel bring-up, the radios and the I2C peripherals are not covered — they
+need real hardware, and every claim about them in the docs was checked
+against a register read rather than a datasheet.
 
-## Regenerating the screenshots
+### Regenerating the screenshots
 
-The README's images come from the firmware, not from a drawing tool. After any
+The images on this page come from the firmware, not a drawing tool. After any
 layout change:
 
 ```sh
@@ -166,7 +237,7 @@ cd core/test && make render_docs && ./render_docs
 ../../docs/img/build.sh          # needs ImageMagick
 ```
 
-## Regenerating fonts
+### Regenerating fonts
 
 ```sh
 cd core/tools
@@ -182,33 +253,36 @@ advance table in `core/src/hero_size.c`:
 
 Otherwise text sizing will silently disagree with what LVGL renders.
 
-## Known limitations
+### Hardware notes
+
+Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h).
+Several contradict Waveshare's own example — `LCD_CS` is GPIO15, not the 5
+their ESP-IDF sample documents — and
+[docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records how each was established,
+along with an earlier ESP-IDF attempt that never drove the panel past its
+opening frame.
+
+### Known limitations
 
 - **The timezone is hardcoded** to `EST5EDT` in `firmware-c6/src/main.cpp`.
-  It decides when the daily history rolls over, so anywhere outside US Eastern
-  the day boundary lands at the wrong hour. Change `DEVICE_TZ` before
-  flashing.
-- **NVS is unencrypted.** A deliberate trade: the stored key is read-only and
-  restricted, so it leaks a subscriber count rather than the ability to move
-  money.
-- **Provisioning is unencrypted.** The setup access point is open and the key
-  form is plain HTTP, so during first-run setup anyone in radio range could
-  capture the WiFi password and the Stripe key. Deliberate, and explained in
-  the build plan — but worth knowing before you set one up in a crowded
-  place.
+  It decides when the daily history rolls over, so outside US Eastern the day
+  boundary lands at the wrong hour. Change `DEVICE_TZ` before flashing.
+- **NVS is unencrypted**, and **provisioning is unencrypted** — both covered
+  under "The numbers are yours" above.
 
 [docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
 and what is deliberately not built.
 
-## Notable deviations from the spec
+### Deviations from the spec
 
-Findings from real hardware that contradict the written spec:
+Findings from real hardware that contradict
+[the written spec](docs/stripe-revenue-display-spec.md):
 
 1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** Inherited from
-   an IPS panel where `0x04`-`0x30` collapsed to the same mid-gray. Unverified
-   on this AMOLED, where the reasoning does not carry over -- a black pixel
-   here is simply off, so the spec's `#121211` may well be viable. Measure
-   before changing it.
+   an IPS panel where `0x04`-`0x30` collapsed to the same mid-gray.
+   Unverified on this AMOLED, where the reasoning does not carry over — a
+   black pixel here is simply off, so the spec's `#121211` may well be
+   viable. Measure before changing it.
 
 2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace
    spends a full character cell on `.`, shrinking digits enough to hurt
@@ -216,9 +290,9 @@ Findings from real hardware that contradict the written spec:
    anti-jitter property that motivated the monospace rule anyway.
 
 3. **Streaming JSON is kept, but not for the reason the spec gives (spec
-   8.3).** Measured with TLS open: 155KB free and a 131KB largest block, where
-   buffer-then-parse fits. It is kept because it is O(1) in account size, not
-   because it is required.
+   8.3).** Measured with TLS open: 155KB free and a 131KB largest block,
+   where buffer-then-parse fits. It is kept because it is O(1) in account
+   size, not because it is required.
 
 ## License
 
