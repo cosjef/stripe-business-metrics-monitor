@@ -32,6 +32,7 @@
 #include "battery_hw.h"
 #include "board.h"
 #include "buttons.h"
+#include "touch.h"
 #include "display.h"
 #include "portal.h"
 #include "settings.h"
@@ -1358,6 +1359,10 @@ void setup(void)
         Serial.println("HALT: display init failed");
         return;
     }
+    /* After the rails: the touch controller is powered from the same ALDOs as
+     * the panel, so it cannot answer before power_up(). */
+    touch_begin();
+
     Serial.printf("layout: panel %dpx, hero %d-%dpx\n",
                   PANEL_PX, SIZE_HERO_MIN, SIZE_HERO_MAX);
 
@@ -1598,7 +1603,10 @@ void loop(void)
      * A press moves the deck and restarts the dwell, so the screen you asked
      * for gets a full interval rather than whatever was left of the last one.
      */
-    const int nudge = buttons_poll();
+    int nudge = buttons_poll();
+    if (nudge == 0) {
+        nudge = touch_poll();
+    }
     if (nudge != 0 && s_visible_count > 0) {
         s_slot = (s_slot + nudge + s_visible_count) % s_visible_count;
         show(s_slot);
