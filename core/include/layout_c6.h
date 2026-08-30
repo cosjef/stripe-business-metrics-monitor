@@ -132,10 +132,6 @@
  */
 #define C6_BATT_W               (34)
 #define C6_BATT_H               (17)
-/* Clear space between the glyph's nub and the pill's left edge. The glyph is
- * placed from the pill's real position, so this is a true gap rather than a
- * guess about how wide the pill will be. */
-#define C6_BATT_GAP             (16)
 #define C6_BATT_CENTER_Y        (46)
 
 /* Delta pill, right-aligned on the label row. */

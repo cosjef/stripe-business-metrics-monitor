@@ -502,7 +502,7 @@ static void draw_battery_glyph(int pct, _Bool charging)
     const int pill_w = lv_obj_get_width(s_card.pill);
     const int pill_left = PANEL_PX - PAD_PX - pill_w;
 
-    const int bx = pill_left - BATT_GAP - 3 - BATT_W;   /* 3 = nub */
+    const int bx = (PANEL_PX - (BATT_W + 3)) / 2;      /* 3 = nub */
     const int by = BATT_CENTER_Y - BATT_H / 2;
 
     lv_obj_set_pos(s_card.batt_body, bx, by);

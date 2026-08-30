@@ -134,7 +134,11 @@ static const char *s_labels[SCREEN_COUNT] = {
     [SCREEN_TRIALS]        = "TRIALS",
     [SCREEN_CONVERSION]    = "CONVERSION",
     [SCREEN_CANCELLATIONS] = "CANCELLED",
-    [SCREEN_ARR]           = "ANNUAL RUN RATE",
+    /* "ARR" rather than "ANNUAL RUN RATE": the long form ran under the
+     * panel-centred battery glyph, and the acronym is what anyone reading a
+     * revenue display already uses. The subtitle still says "at current
+     * MRR", so nothing is lost. */
+    [SCREEN_ARR]           = "ARR",
     [SCREEN_ARPU]          = "ARPU",
     [SCREEN_NET_CHANGE]    = "NET 30D",
     [SCREEN_FAILED]        = "FAILED",
