@@ -9,9 +9,9 @@
 # firmware/ first if it is missing.
 
 CC      ?= cc
-CFLAGS  := -std=c11 -Wall -Wextra -Werror -g -O0 -I ../include
+CFLAGS  := -std=c11 -Wall -Wextra -Werror -g -O0 -I ../include -DBOARD_C6_AMOLED_216
 
-LVGL    := ../../firmware-s3/managed_components/lvgl__lvgl
+LVGL    := ../../firmware-c6/.pio/libdeps/c6_amoled/lvgl
 
 # LVGL for the host: everything except other vendors' GPU backends, platform
 # drivers, and the heavyweight optional libs.
@@ -27,13 +27,13 @@ FONT_SRCS := $(wildcard ../fonts/stripe_sans_*.c) ../fonts/fonts.c
 
 # LVGL and the generated fonts are third-party or machine-written; -Werror on
 # our own code, quiet for theirs.
-LV_CFLAGS := -std=c11 -w -O0 -I . -I ../include -I ../fonts \
+LV_CFLAGS := -std=c11 -w -O0 -DBOARD_C6_AMOLED_216 -I . -I ../include -I ../fonts \
              -I $(LVGL) -I $(LVGL)/src -DLV_CONF_INCLUDE_SIMPLE
 
 DEPS := ../include/hero_size.h ../include/layout.h ../include/baseline.h
 
 CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_axp2101 test_jsonstream test_wifi_retry test_invoices
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_jsonstream test_wifi_retry test_invoices
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
 
@@ -134,8 +134,6 @@ test_sparkline: test_sparkline.c ../src/sparkline.c ../src/history.c ../include/
 test_jsonstream: test_jsonstream.c ../src/jsonstream.c ../src/mrr.c ../include/jsonstream.h
 	$(CC) $(CFLAGS) -o $@ test_jsonstream.c ../src/jsonstream.c ../src/mrr.c
 
-test_axp2101: test_axp2101.c ../src/axp2101_reg.c ../include/axp2101_reg.h
-	$(CC) $(CFLAGS) -o $@ test_axp2101.c ../src/axp2101_reg.c
 
 test_history: test_history.c ../src/history.c ../include/history.h
 	$(CC) $(CFLAGS) -o $@ test_history.c ../src/history.c
@@ -146,5 +144,5 @@ test_geometry: test_geometry.c ../src/geometry.c ../include/geometry.h
 test_wifi_retry: test_wifi_retry.c ../src/wifi_retry.c ../include/wifi_retry.h
 	$(CC) $(CFLAGS) -o $@ test_wifi_retry.c ../src/wifi_retry.c
 
-test_layout_c6: test_layout_c6.c ../src/geometry.c ../src/hero_size.c ../include/layout_c6.h ../include/layout_s3.h
+test_layout_c6: test_layout_c6.c ../src/geometry.c ../src/hero_size.c ../include/layout_c6.h
 	$(CC) $(CFLAGS) -o $@ test_layout_c6.c ../src/geometry.c ../src/hero_size.c -lm

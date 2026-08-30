@@ -84,7 +84,9 @@ static void test_spec_baselines_fit_on_screen(void)
             char what[96];
             snprintf(what, sizeof(what), "%s baseline at %dpx stays on-screen",
                      names[b], size);
-            check_true(what, top >= 0 && top < 240);
+            /* PANEL_PX, not a literal 240: hardcoding one panel's height
+             * meant this asserted against the wrong screen. */
+            check_true(what, top >= 0 && top < PANEL_PX);
         }
     }
 }
@@ -93,12 +95,13 @@ static void test_spec_baselines_fit_on_screen(void)
 
 /*
  * Mirrors font_for_size() without depending on LVGL types. The real function
- * lives in main/fonts/fonts.c and needs lvgl.h, which the host build does not
+ * lives in core/fonts/fonts.c and needs lvgl.h, which the host build does not
  * have; this asserts the size set it must cover stays in sync.
  */
 static int font_exists_for(int size_px)
 {
-    static const int shipped[] = {18, 20, 22, 24, 32, 40, 52, 60, 64, 76, 88, 96};
+    static const int shipped[] = {26, 29, 31, 35, 46, 58, 74, 86, 92,
+                                  104, 108, 120, 126, 137};
     for (size_t i = 0; i < sizeof(shipped) / sizeof(shipped[0]); i++) {
         if (shipped[i] == size_px) {
             return 1;
@@ -290,13 +293,14 @@ static void test_layout_constants(void)
     printf("layout geometry\n");
 
     /* The text column is the panel minus padding on both sides (spec 2.3). */
-    check_int("text column = 240 - 2*padding", TEXT_COLUMN_PX, 240 - 2 * PAD_PX);
+    check_int("text column = panel - 2*padding", TEXT_COLUMN_PX,
+              PANEL_PX - 2 * PAD_PX);
 
     /* Baselines must be ordered top to bottom and fit the panel. */
     check_true("label above hero",      LABEL_BASELINE_Y < HERO_BASELINE_Y);
     check_true("hero above subtitle",   HERO_BASELINE_Y < SUBTITLE_BASELINE_Y);
     check_true("subtitle above footer", SUBTITLE_BASELINE_Y < FOOTER_BASELINE_Y);
-    check_true("footer on screen",      FOOTER_BASELINE_Y < 240);
+    check_true("footer on screen",      FOOTER_BASELINE_Y < PANEL_PX);
 
     /* Rotation dots must fit within the panel width (6 dots, 17px apart). */
     const int span = (6 - 1) * DOTS_GAP;

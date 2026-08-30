@@ -201,7 +201,7 @@ cd test && make && for t in ./test_*; do [ -x "$t" ] && $t; done
 probe screen shows a label, a green bar and a counter incrementing once a
 second. This is what the ESP-IDF build could never do past frame one.
 
-New tree: `firmware-c6/`, a PlatformIO project. `firmware-s3/` (ESP-IDF) is untouched.
+New tree: `firmware-c6/`, a PlatformIO project. the ESP-IDF tree has since been removed.
 
 **What made the difference.** Two things the IDF path never did, both taken
 from Clawdmeter's `waveshare_amoled_216_c6` env, which runs on this exact

@@ -24,7 +24,31 @@
 #include "../include/geometry.h"
 #include "../include/hero_size.h"
 #include "../include/layout_c6.h"
-#include "../include/layout_s3.h"
+/*
+ * The 240x240 panel's sizes, inlined.
+ *
+ * This suite exists to prove the C6 values were DERIVED from those originals
+ * rather than guessed, so it needs them even though that board is gone. They
+ * are inlined rather than kept in a header for a device that no longer
+ * exists: the numbers are historical constants now, not configuration.
+ */
+#define S3_PANEL_PX        240
+#define S3_PAD_PX          16
+#define S3_SIZE_LABEL      20
+#define S3_SIZE_SUBTITLE   22
+#define S3_SIZE_FOOTER     18
+#define S3_SIZE_HERO_MAX   96
+#define S3_SIZE_HERO_MIN   24
+#define S3_TEXT_COLUMN_PX      208
+#define S3_LABEL_BASELINE_Y     16
+#define S3_HERO_BASELINE_Y     150
+#define S3_SUBTITLE_BASELINE_Y 178
+#define S3_FOOTER_BASELINE_Y   210
+#define S3_DOTS_CENTER_Y       214
+#define S3_DOTS_RADIUS           4
+#define S3_DOTS_GAP             17
+#define S3_LEGIBILITY_FLOOR_PX  24
+#define S3_ABSOLUTE_FLOOR_PX    20
 
 static int failures = 0;
 static int checks = 0;

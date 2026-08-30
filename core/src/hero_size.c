@@ -5,12 +5,6 @@
  * the host. See hero_size.h for why this measures per glyph rather than using
  * the spec's 0.6em monospace constant.
  */
-/* Only present in the ESP-IDF build; the host harness compiles without it and
- * falls through to the S3 ladder, which is what the host tests expect. */
-#ifdef ESP_PLATFORM
-#include "sdkconfig.h"
-#endif
-
 #include "hero_size.h"
 #include "layout.h"
 
@@ -25,38 +19,20 @@
  * panel is 2x the pixels but only 1.4x the physical size, so each step is
  * scaled by the density ratio to hold the same millimetre height (geometry.c).
  */
-/* BOARD_C6_AMOLED_216 is the Arduino port's selector -- it has no
- * sdkconfig.h, so CONFIG_IDF_TARGET_ESP32C6 never appears there and the C6
- * would quietly take the S3 ladder. Must match the condition in layout.h. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(BOARD_C6_AMOLED_216)
 const int hero_font_sizes[] = {35, 46, 58, 74, 86, 92, 104, 108, 120, 126, 137};
-#else
-const int hero_font_sizes[] = {24, 32, 40, 52, 60, 64, 76, 88, 96};
-#endif
 const size_t hero_font_sizes_count =
     sizeof(hero_font_sizes) / sizeof(hero_font_sizes[0]);
 
 /*
- * The ladder above and the geometry in layout.h are selected by two separate
- * preprocessor conditions, and nothing but this check keeps them agreeing. If
- * they drift -- a new board flag added to one and not the other -- the result
- * is a deck laid out for one panel and typed for the other, which renders
- * without error and is wrong only by measurement. Fail the build instead.
- *
- * SIZE_HERO_MAX comes from layout.h; the top of the ladder must be the same
- * value the layout believes it is reserving space for.
+ * The ladder above and the geometry in layout.h are maintained separately,
+ * and nothing but this check keeps them agreeing. A ladder whose top does not
+ * match the size the layout reserves space for renders without error and is
+ * wrong only by measurement, so fail the build instead.
  */
-#if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(BOARD_C6_AMOLED_216)
 _Static_assert(SIZE_HERO_MAX == 137,
-               "C6 ladder selected but layout.h did not pick the C6 geometry");
+               "hero ladder and layout.h disagree about the maximum size");
 _Static_assert(SIZE_HERO_MIN == 35,
-               "C6 ladder selected but layout.h did not pick the C6 geometry");
-#else
-_Static_assert(SIZE_HERO_MAX == 96,
-               "S3 ladder selected but layout.h did not pick the S3 geometry");
-_Static_assert(SIZE_HERO_MIN == 24,
-               "S3 ladder selected but layout.h did not pick the S3 geometry");
-#endif
+               "hero ladder and layout.h disagree about the minimum size");
 
 /*
  * Advance width per glyph, in thousandths of an em, for Roboto Condensed Bold.

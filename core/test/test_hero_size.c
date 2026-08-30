@@ -81,7 +81,10 @@ static void test_column_constraint(void)
     printf("208px column constraint\n");
 
     check_true("'$6.5k' at 64px fits", text_fits("$6.5k", 64));
-    check_true("'$6.5k' at 96px overflows", !text_fits("$6.5k", 96));
+    /* A size well past the ladder's top must overflow. Expressed against
+     * SIZE_HERO_MAX rather than a literal, which was another panel's cap. */
+    check_true("a size beyond the cap overflows",
+               !text_fits("$6.5k", SIZE_HERO_MAX * 2));
 
     /* Whatever size we pick must fit, by construction. */
     const char *values[] = {"$6.5k", "94", "100", "11", "34%", "+$29", "2"};

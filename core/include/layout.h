@@ -24,7 +24,6 @@
  * wrong by the density ratio, on a panel that would still render happily.
  * Both builds must land on the same constants; see arduino/platformio.ini.
  */
-#if defined(CONFIG_IDF_TARGET_ESP32C6) || defined(BOARD_C6_AMOLED_216)
 #include "layout_c6.h"
 
 #define PANEL_PX            C6_PANEL_PX
@@ -72,62 +71,6 @@
 #define MSG_LINE2_Y         (304)
 #define MSG_HINT_Y          (364)
 
-#else  /* S3, and the host test harness */
-#include "layout_s3.h"
-
-#define PANEL_PX            S3_PANEL_PX
-#define PAD_PX              S3_PAD_PX
-#define TEXT_COLUMN_PX      S3_TEXT_COLUMN_PX
-#define LABEL_BASELINE_Y    S3_LABEL_BASELINE_Y
-#define HERO_BASELINE_Y     S3_HERO_BASELINE_Y
-#define SUBTITLE_BASELINE_Y S3_SUBTITLE_BASELINE_Y
-#define FOOTER_BASELINE_Y   S3_FOOTER_BASELINE_Y
-#define DOTS_CENTER_Y       S3_DOTS_CENTER_Y
-#define DOTS_RADIUS         S3_DOTS_RADIUS
-#define DOTS_GAP            S3_DOTS_GAP
-#define SIZE_LABEL          S3_SIZE_LABEL
-#define SIZE_SUBTITLE       S3_SIZE_SUBTITLE
-#define SIZE_FOOTER         S3_SIZE_FOOTER
-#define SIZE_HERO_MAX       S3_SIZE_HERO_MAX
-#define SIZE_HERO_MIN       S3_SIZE_HERO_MIN
-
-/*
- * Card layout, S3 values.
- *
- * The card is a 480x480 design and is not used on the S3, but the constants
- * must exist for both targets: screens.c is compiled once for both, and the
- * host suite builds against this branch. Scaled down proportionally so a
- * render here is at least coherent rather than off-panel.
- */
-#define CARD_Y              (38)
-#define CARD_H              (150)
-#define CARD_RADIUS         (8)
-#define CARD_PAD            (14)
-#define CARD_SUBTITLE_DY    (11)
-#define CARD_HERO_BASELINE_DY (95)
-#define CARD_BAR_DY         (110)
-#define CARD_BAR_H          (7)
-#define CARD_CAPTION_DY     (124)
-/* Mix variant, S3 values -- half the C6 offsets, same proportions. The card
- * is a 480x480 design, but these must exist for both targets because
- * screens.c compiles once for both and the host suite builds this branch. */
-#define MIX_CARD_H          (160)
-#define MIX_HERO_BASELINE_DY (64)
-#define MIX_ROW1_DY         (88)
-#define MIX_ROW2_DY         (124)
-#define MIX_LABEL_GAP       (3)
-#define BATT_W              (17)
-#define BATT_H              (9)
-#define BATT_CENTER_Y       (23)
-#define PILL_PAD_X          (8)
-#define PILL_PAD_Y          (3)
-
-/* Message screens (setup, auth error). The S3 originals. */
-#define SIZE_MESSAGE        (32)
-#define MSG_LINE1_Y         (118)
-#define MSG_LINE2_Y         (152)
-#define MSG_HINT_Y          (182)
-#endif
 
 /* Legibility floor (spec 2.2) */
 #define LEGIBILITY_FLOOR_PX  (24)  /* anything a user must read reliably */
