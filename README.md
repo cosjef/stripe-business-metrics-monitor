@@ -38,9 +38,17 @@ the device draws.
 ## What you need
 
 **One board: the [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm).**
-It is a 2.16-inch 480x480 AMOLED with a touch layer, a battery connector and
-a USB-C port, all on one piece. Nothing else is required — the board is the
-device.
+A 2.16-inch 480x480 AMOLED with a touch layer, a USB-C port and an on-board
+power controller, all on one piece. Nothing is soldered and no enclosure is
+needed — the board is the device.
+
+Waveshare sells it in a few configurations. This was built and tested on the
+**board with the battery**, which lets it run unplugged and is what the
+battery indicator in the corner reports. The bare board has not been tried:
+the firmware reads the cell voltage from the power controller at boot and
+takes the answer at face value, so what it displays with no cell attached is
+untested. If you only ever intend to run it on USB power, the battery is
+probably unnecessary -- but the tested configuration is the one with it.
 
 **A USB-C cable** that carries data, not just power.
 
