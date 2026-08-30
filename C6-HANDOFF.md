@@ -385,8 +385,34 @@ Deliberately not built:
 - **Trials and conversion screens.** Correctly hidden: the account has no
   trials, and one trial ever makes a conversion rate misleading at any value.
 
-Still open:
+### Parked: today's deltas from the events feed
 
-- `events.c` is unported -- "today's" deltas rather than 30-day windows.
-- The layouts were designed and judged while the panel was rotated. They are
-  worth re-reading now that it is upright.
+`events.c` is unported and stays that way. It classifies Stripe's `/v1/events`
+feed into today-local counts -- new paid, churned, revenue received -- which
+would give the deck a daily view instead of only 30-day windows.
+
+Measured on the live account before deciding: 12 events today, of which
+exactly one was a payment. A "today" screen would read "$49.00, 1 payment"
+against NET 30D's "+$179.00". At roughly 0.3 signups and 0.2 cancellations a
+day, most days it says zero -- the same permanent-zero problem that keeps
+TRIALS hidden and got tier composition rejected.
+
+It also runs against a decision the deck already made. events.h records that a
+"Last Event" screen was removed because it showed "changed" from
+`subscription.updated`, an event that fires for seat changes and
+payment-method edits alike and so told the reader nothing actionable.
+
+And it would cost a third API call with pagination -- the account produced
+100+ events in four days -- for a figure the existing calls can nearly supply.
+
+If a daily view is ever wanted, build "revenue received today" from the
+`/v1/invoices` call the FAILED screen already makes. One number, no new
+endpoint, and genuinely different from a 30-day window. Do not add the events
+feed for it.
+
+`events.c` keeps its 58 checks and costs nothing sitting unwired.
+
+## Still open
+
+- The layouts were designed and judged while the panel was rotated 90 degrees.
+  They are worth re-reading now that it is upright.
