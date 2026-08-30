@@ -9,17 +9,17 @@ you today.
 It cycles through eight screens, five seconds each, with numbers you can read
 from across the room:
 
-**What you're making.** Monthly recurring revenue and its 30-day trend,
+**What you're making:** Monthly recurring revenue and its 30-day trend,
 annual run rate, and average revenue per subscriber.
 
-**Who's arriving and leaving.** New paid signups and whether they're
+**Who's arriving and leaving:** New paid signups and whether they're
 accelerating or slowing. Subscribers gained versus lost. Revenue that's been
 canceled but hasn't churned yet.
 
-**What the month actually did.** The net change in revenue over the past 30
+**What the month actually did:** The net change in revenue over the past 30
 days, combining growth and churn into one number.
 
-**What needs your attention.** Failed payments, how much revenue is at risk,
+**What needs your attention:** Failed payments, how much revenue is at risk,
 and when Stripe will retry them.
 
 No app. No dashboard. No browser tab you forget to open. Your revenue data
