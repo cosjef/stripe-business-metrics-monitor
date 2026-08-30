@@ -58,6 +58,14 @@ Eastern time.
       eFuse-burned key, which is irreversible and complicates development
       flashing.
 
+- [ ] **Provisioning is unencrypted.** The setup AP is open and the key form
+      is served over plain HTTP, so for the few minutes of first-run setup
+      anyone in radio range can capture the WiFi password and the Stripe key.
+      Deliberate -- a WPA2 AP needs a passphrase the owner cannot know in
+      advance, and HTTPS on an IP address produces a certificate warning worse
+      than the exposure -- but it is the first thing to revisit if this ever
+      ships to someone other than the person who built it.
+
 - [ ] **No live MRR on the setup screen.** Spec §9.1 step 4 wants the number
       shown before setup completes — the moment that convinces a skeptic. The
       key is validated against the live API, so the figure is available; it is

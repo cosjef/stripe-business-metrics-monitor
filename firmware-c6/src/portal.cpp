@@ -102,6 +102,13 @@ static const char PAGE_KEY_HEAD[] =
 "<p class=sub>The display needs a restricted key that can read your "
 "subscriptions.</p>";
 
+/*
+ * The scopes named here are the ones the firmware actually calls:
+ * /v1/subscriptions and /v1/invoices. It previously asked for Events and
+ * Customers as well, inherited from a plan to use the events feed that was
+ * measured and dropped -- so it was requesting access it never used, on a
+ * device whose whole argument is that it can be trusted with a key.
+ */
 static const char PAGE_KEY_TAIL[] =
 "<form method=POST action=/key>"
 "<label for=k>Restricted API key</label>"
@@ -112,7 +119,7 @@ static const char PAGE_KEY_TAIL[] =
 "<ul>"
 "<li>Create it in Stripe under Developers &rarr; API keys &rarr; "
 "Restricted keys</li>"
-"<li>Grant <b>Read</b> on Subscriptions, Events and Customers</li>"
+"<li>Grant <b>Read</b> on Subscriptions and Invoices</li>"
 "<li>Leave everything else set to None</li>"
 "</ul>"
 "</body></html>";
@@ -298,6 +305,24 @@ bool portal_start(portal_creds_cb_t on_creds, portal_key_cb_t on_key,
      * phone off the network mid-setup, right before the key form they were
      * about to fill in. Bringing the AP up once, in a mode that serves both
      * phases, keeps the phone associated the whole way through.
+     */
+    /*
+     * The setup AP is OPEN, and the key form is served over plain HTTP.
+     *
+     * For the few minutes of provisioning, anyone in radio range can see the
+     * WiFi password and the Stripe key as they are submitted. That is a real
+     * exposure and it is deliberate: a WPA2 AP needs a passphrase the owner
+     * has no way to learn before connecting, and HTTPS needs a certificate
+     * for an IP address that every phone would reject with a warning worse
+     * than the problem it solves.
+     *
+     * What limits it: the window is minutes rather than always, the key is
+     * meant to be a read-only restricted key, and the alternative designs
+     * either cannot be used by a non-technical owner or teach them to click
+     * through certificate warnings.
+     *
+     * If this device ever ships to people who are not the person who built
+     * it, this is the first thing to revisit.
      */
     if (!s_ap_up) {
         WiFi.mode(WIFI_AP_STA);

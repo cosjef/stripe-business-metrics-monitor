@@ -34,6 +34,28 @@ A few of the decisions they show:
   is drawn, an ARPU comparison needs six customers on each side, and a figure
   it cannot vouch for is shown as stale rather than presented as current.
 
+## Hardware
+
+[Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm)
+— a 480x480 CO5300 AMOLED with capacitive touch, an AXP2101 PMIC, and a
+lithium cell. Nothing is soldered and no enclosure is required; the board is
+the device.
+
+Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h).
+Several contradict Waveshare's own example — `LCD_CS` is GPIO15, not the 5
+their ESP-IDF sample documents — and
+[docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records how each was established.
+
+## The Stripe key
+
+The device asks for a **restricted key** (`rk_...`) during setup, and needs
+**Read** on Subscriptions and Invoices — nothing else. It never writes, and
+the key is validated against the live API before it is stored, so a wrong one
+fails while you are still holding your phone.
+
+A key with only those two read scopes cannot move money. It can reveal your
+subscriber count and revenue, which is what the device is for.
+
 ## Layout
 
 ```
@@ -133,6 +155,11 @@ Otherwise text sizing will silently disagree with what LVGL renders.
 - **NVS is unencrypted.** A deliberate trade: the stored key is read-only and
   restricted, so it leaks a subscriber count rather than the ability to move
   money.
+- **Provisioning is unencrypted.** The setup access point is open and the key
+  form is plain HTTP, so during first-run setup anyone in radio range could
+  capture the WiFi password and the Stripe key. Deliberate, and explained in
+  the build plan — but worth knowing before you set one up in a crowded
+  place.
 
 [docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
 and what is deliberately not built.
