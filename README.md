@@ -1,17 +1,33 @@
 # Stripe Revenue Display
 
-A small desk instrument that shows your live Stripe revenue. It sits on a
-shelf, cycles through eight screens, and answers one question at a time in
-numbers you can read from across the room.
+A small instrument that sits on your desk and shows your live Stripe
+revenue.
 
 ![MRR](docs/img/mrr.png)
+
+It cycles through eight screens, five seconds each, in numbers you can read
+from across the room:
+
+**What you are making.** Monthly recurring revenue with a 30-day trend line,
+the same figure as an annual run rate, and the average revenue per
+subscriber.
+
+**Who is arriving and who is leaving.** New paid signups and whether they are
+speeding up or slowing down. The subscribers you gained against the ones you
+lost. Revenue that has given notice but has not left yet.
+
+**What the month actually did.** The net effect on revenue over 30 days, so
+growth and churn land as one number instead of two you have to reconcile.
+
+**What needs you today.** Failed payments, with what they are worth and when
+Stripe next retries them.
 
 No app, no dashboard, no browser tab you forget to open. It talks to the
 Stripe API and to nothing else.
 
 There is no soldering and no enclosure to print. You buy one board, flash it
 over USB, and finish the setup on your phone. If you have never written
-firmware before, that is fine — this page assumes you have not.
+firmware before, that is fine, because this page assumes you have not.
 
 ## What it shows
 
@@ -22,11 +38,11 @@ shorter loop than a mature one.
 | | | |
 |:--:|:--:|:--:|
 | ![MRR](docs/img/mrr.png) | ![New paid](docs/img/new_paid.png) | ![Paid subs](docs/img/paid_subs.png) |
-| **MRR** — monthly recurring revenue, with its 30-day trend | **NEW PAID** — signups, and whether they are speeding up | **PAID SUBS** — the flow behind the count |
+| **MRR**: monthly recurring revenue, with its 30-day trend | **NEW PAID**: signups, and whether they are speeding up | **PAID SUBS**: the flow behind the count |
 | ![Cancelled](docs/img/cancelled.png) | ![ARR](docs/img/arr.png) | ![ARPU](docs/img/arpu.png) |
-| **CANCELLED** — revenue that gave notice but has not left yet | **ARR** — the annual figure, in annual units | **ARPU** — are the customers you win worth more than the ones you lose |
+| **CANCELLED**: revenue that gave notice but has not left yet | **ARR**: the annual figure, in annual units | **ARPU**: are the customers you win worth more than the ones you lose |
 | ![Net 30d](docs/img/net_30d.png) | ![Failed](docs/img/failed.png) | ![Stale](docs/img/stale.png) |
-| **NET 30D** — what the month did to revenue | **FAILED** — payments that need a nudge | **stale** — what it shows instead of a number it cannot vouch for |
+| **NET 30D**: what the month did to revenue | **FAILED**: payments that need a nudge | **stale**: what it shows instead of a number it cannot vouch for |
 
 The last tile is not a screen but a state. If a fetch fails, the deck says so
 rather than leaving an old figure up looking current.
@@ -40,12 +56,12 @@ the device draws.
 **One board: the [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm).**
 A 2.16-inch 480x480 AMOLED with a touch layer, a USB-C port and an on-board
 power controller, all on one piece. Nothing is soldered and no enclosure is
-needed — the board is the device.
+needed, because the board is the device.
 
 Waveshare sells it in a few configurations. This was built on the **board
 with the battery**, which lets it sit on a shelf untethered and is what the
 battery indicator in the corner reports. The board works the same on USB
-power alone, so the battery is optional -- add it if you want the device to
+power alone, so the battery is optional. Add it if you want the device to
 survive being unplugged.
 
 **A USB-C cable** that carries data, not just power.
@@ -87,8 +103,8 @@ A key limited to those two read permissions cannot move money, refund
 anyone, or change a subscription. It can reveal your subscriber count and
 revenue, which is the whole point of the device.
 
-Keep the key on screen or paste it somewhere you can reach from your phone —
-you will need it in step 5, and Stripe only shows it once.
+Keep the key on screen or paste it somewhere you can reach from your phone.
+You will need it in step 5, and Stripe only shows it once.
 
 ### 3. Flash the board
 
@@ -120,8 +136,8 @@ and shows the name on the panel:
 
 ![Setup](docs/img/setup.png)
 
-On your phone, join that open network — `Setup-` followed by four characters
-from the board's ID. A setup page should open by itself. If it does not,
+On your phone, join that open network, named `Setup-` followed by four
+characters from the board's ID. A setup page should open by itself. If it does not,
 browse to **http://192.168.4.1/**.
 
 ### 5. Give it your WiFi and your key
@@ -149,7 +165,7 @@ those screens show the figure without the comparison. That is deliberate: the
 device would rather show less than guess.
 
 **Colour means something specific.** Green is a realized gain and nothing
-else. Amber is a degraded state. Red is a threshold worth acting on — the
+else. Amber is a degraded state. Red is a threshold worth acting on, and the
 FAILED screen is the only one that earns it.
 
 **It keeps the last good numbers.** If WiFi drops or Stripe is unreachable,
@@ -181,7 +197,7 @@ The device retries by itself every thirty seconds until the first fetch
 succeeds, so this often clears without help.
 
 **Screens are missing from the rotation.** That is intended. A screen with
-nothing to report hides itself — no failed payments means no FAILED screen.
+nothing to report hides itself, so no failed payments means no FAILED screen.
 
 **`pio: command not found`.** PlatformIO is not on your PATH. Open a new
 terminal after installing, then run `pio --version` again.
@@ -196,8 +212,8 @@ network is open and the key page is plain HTTP, so during those few minutes
 someone in radio range could capture your WiFi password and the Stripe key.
 Once setup finishes, all Stripe traffic runs over TLS against a pinned
 certificate. The stored key is unencrypted on the board, which is a
-deliberate trade — a read-only restricted key leaks a subscriber count, not
-the ability to move money.
+deliberate trade, because a read-only restricted key leaks a subscriber
+count, not the ability to move money.
 
 ## For developers
 
@@ -221,7 +237,7 @@ make
 for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-1,518 checks across 26 suites — text measurement, hero auto-sizing, MRR
+1,518 checks across 26 suites: text measurement, hero auto-sizing, MRR
 arithmetic, the streaming JSON scanners, rotation rules, freshness, battery
 thresholds, refresh scheduling. One boots real LVGL against an offscreen
 framebuffer and asserts on actual pixels.
@@ -229,7 +245,7 @@ framebuffer and asserts on actual pixels.
 `make quick` skips the LVGL build. LVGL comes from the PlatformIO
 dependency: `cd firmware-c6 && pio pkg install`.
 
-Panel bring-up, the radios and the I2C peripherals are not covered — they
+Panel bring-up, the radios and the I2C peripherals are not covered. They
 need real hardware, and every claim about them in the docs was checked
 against a register read rather than a datasheet.
 
@@ -262,8 +278,8 @@ Otherwise text sizing will silently disagree with what LVGL renders.
 ### Hardware notes
 
 Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h).
-Several contradict Waveshare's own example — `LCD_CS` is GPIO15, not the 5
-their ESP-IDF sample documents — and
+Several contradict Waveshare's own example (`LCD_CS` is GPIO15, not the 5
+their ESP-IDF sample documents), and
 [docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records how each was established,
 along with an earlier ESP-IDF attempt that never drove the panel past its
 opening frame.
@@ -273,8 +289,8 @@ opening frame.
 - **The timezone is hardcoded** to `EST5EDT` in `firmware-c6/src/main.cpp`.
   It decides when the daily history rolls over, so outside US Eastern the day
   boundary lands at the wrong hour. Change `DEVICE_TZ` before flashing.
-- **NVS is unencrypted**, and **provisioning is unencrypted** — both covered
-  under "The numbers are yours" above.
+- **NVS is unencrypted**, and **provisioning is unencrypted**. Both are
+  covered under "The numbers are yours" above.
 
 [docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
 and what is deliberately not built.
@@ -286,7 +302,7 @@ Findings from real hardware that contradict
 
 1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** Inherited from
    an IPS panel where `0x04`-`0x30` collapsed to the same mid-gray.
-   Unverified on this AMOLED, where the reasoning does not carry over — a
+   Unverified on this AMOLED, where the reasoning does not carry over. A
    black pixel here is simply off, so the spec's `#121211` may well be
    viable. Measure before changing it.
 
@@ -302,7 +318,7 @@ Findings from real hardware that contradict
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).
 
 Roboto Condensed is vendored under the SIL Open Font License; see
 [core/tools/fonts/LICENSE-RobotoCondensed.txt](core/tools/fonts/LICENSE-RobotoCondensed.txt).
