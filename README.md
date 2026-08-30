@@ -4,8 +4,6 @@ Firmware for a single-purpose desk instrument that shows live Stripe revenue
 metrics. It answers one question at a time, in numbers readable across a room,
 and talks to nothing except the Stripe API.
 
-Not affiliated with Stripe.
-
 ## Layout
 
 ```
@@ -108,5 +106,12 @@ Findings from real hardware that contradict the written spec:
 
 ## License
 
-Roboto Condensed is used under the SIL Open Font License; see
+MIT — see [LICENSE](LICENSE).
+
+Roboto Condensed is vendored under the SIL Open Font License; see
 [core/tools/fonts/LICENSE-RobotoCondensed.txt](core/tools/fonts/LICENSE-RobotoCondensed.txt).
+The generated font files in `core/fonts/` are derived from it and carry the
+same terms.
+
+Not affiliated with Stripe. "Stripe" is their trademark; this project only
+reads their public API.
