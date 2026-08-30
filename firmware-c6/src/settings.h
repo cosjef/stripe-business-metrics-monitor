@@ -27,6 +27,14 @@ bool settings_clear_wifi(void);
 
 bool settings_have_stripe_key(void);
 bool settings_get_stripe_key(char *key, size_t key_len);
+
+/*
+ * The POSIX TZ string, resolved once from the device's public IP and cached
+ * so the lookup is a setup-time cost rather than a per-boot one. Absent
+ * until the first successful lookup; callers fall back to TZ_FALLBACK.
+ */
+bool settings_get_timezone(char *tz, size_t tz_len);
+bool settings_set_timezone(const char *tz);
 bool settings_set_stripe_key(const char *key);
 
 /*

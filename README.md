@@ -23,8 +23,8 @@ growth and churn land as one number instead of two you have to reconcile.
 **What needs you today.** Failed payments, with what they are worth and when
 Stripe next retries them.
 
-No app, no dashboard, no browser tab you forget to open. It talks to the
-Stripe API and to nothing else.
+No app, no dashboard, no browser tab you forget to open. Your revenue data
+goes to Stripe and nowhere else.
 
 There is no soldering and no enclosure to print. You buy a Waveshare
 ESP32-C6 board, flash it over USB, and finish setup on your phone over WiFi.
@@ -205,8 +205,17 @@ terminal after installing, then run `pio --version` again.
 
 ## The numbers are yours
 
-The device reads your Stripe account and sends the data nowhere else. There
+The device reads your Stripe account and sends that data nowhere else. There
 is no telemetry, no analytics, and no server belonging to this project.
+
+It makes exactly one request to anyone other than Stripe. On first sync it
+asks [ip-api.com](https://ip-api.com) which timezone its address is in, so
+the daily history rolls over at your midnight rather than someone else's.
+The answer is cached, so this happens once per setup, not once per boot. The
+request sends nothing but the connection itself, and no Stripe data is
+involved. If it fails, or if you would rather it never happened, the device
+falls back to US Eastern and carries on; blocking that host costs you a
+correct day boundary and nothing else.
 
 Two things worth knowing before you set one up in a busy place: the setup
 network is open and the key page is plain HTTP, so during those few minutes
@@ -285,9 +294,6 @@ silent: every init step still reports success because nothing is listening.
 
 ### Known limitations
 
-- **The timezone is hardcoded** to `EST5EDT` in `firmware-c6/src/main.cpp`.
-  It decides when the daily history rolls over, so outside US Eastern the day
-  boundary lands at the wrong hour. Change `DEVICE_TZ` before flashing.
 - **NVS is unencrypted**, and **provisioning is unencrypted**. Both are
   covered under "The numbers are yours" above.
 

@@ -19,6 +19,7 @@
 #define KEY_STRIPE    "stripe_key"
 #define KEY_HISTORY   "mrr_history"
 #define KEY_CACHE     "last_good"   /* matches the ESP-IDF build */
+#define KEY_TZ        "timezone"
 
 /*
  * Every read guards with isKey() before getString().
@@ -161,6 +162,31 @@ bool settings_set_stripe_key(const char *key)
         return false;
     }
     const bool ok = s_prefs.putString(KEY_STRIPE, key) > 0;
+    s_prefs.end();
+    return ok;
+}
+
+bool settings_get_timezone(char *tz, size_t tz_len)
+{
+    if (tz == NULL || tz_len == 0 || !open_ro()) {
+        return false;
+    }
+    const String v = s_prefs.getString(KEY_TZ, "");
+    s_prefs.end();
+
+    if (v.length() == 0 || v.length() >= tz_len) {
+        return false;
+    }
+    snprintf(tz, tz_len, "%s", v.c_str());
+    return true;
+}
+
+bool settings_set_timezone(const char *tz)
+{
+    if (tz == NULL || tz[0] == '\0' || !open_rw()) {
+        return false;
+    }
+    const bool ok = s_prefs.putString(KEY_TZ, tz) > 0;
     s_prefs.end();
     return ok;
 }

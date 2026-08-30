@@ -38,6 +38,7 @@
 #include "settings.h"
 #include "stripe_fetch.h"
 #include "refresh.h"
+#include "timezone.h"
 
 extern "C" {
 #include "cache.h"
@@ -84,7 +85,14 @@ extern "C" {
 #define ORIENTATION_TEST_S 0
 
 
-#define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
+/*
+ * The timezone is resolved from the device's public IP at first sync and
+ * cached in NVS, so there is no setup step for it. TZ_FALLBACK covers a
+ * failed lookup. See core/include/timezone.h.
+ */
+#define TZ_LOOKUP_HOST "ip-api.com"
+#define TZ_LOOKUP_PATH "/json/?fields=timezone"
+#define TZ_LOOKUP_TIMEOUT_MS 4000
 #define NTP_SERVER_1 "pool.ntp.org"
 #define NTP_SERVER_2 "time.nist.gov"
 
@@ -1015,9 +1023,69 @@ static int32_t local_epoch_day(void)
     return (int32_t)(day_start / 86400);
 }
 
+/*
+ * Ask ip-api.com which timezone this address is in.
+ *
+ * Plain HTTP and no certificate check: the answer decides which calendar
+ * day a sample is filed under, not what the figures are, and a hostile
+ * answer is bounded by tz_is_valid(). Worth knowing that this is the one
+ * request the device makes to anyone other than Stripe, and that it sends
+ * nothing but the connection itself.
+ */
+static bool lookup_timezone(char *out, size_t out_len)
+{
+    NetworkClient client;
+    client.setTimeout(TZ_LOOKUP_TIMEOUT_MS / 1000);
+
+    if (!client.connect(TZ_LOOKUP_HOST, 80)) {
+        return false;
+    }
+
+    client.printf("GET %s HTTP/1.1\r\n", TZ_LOOKUP_PATH);
+    client.printf("Host: %s\r\n", TZ_LOOKUP_HOST);
+    client.print("User-Agent: stripe-metrics-monitor/0.4 (esp32-c6)\r\n");
+    client.print("Connection: close\r\n\r\n");
+
+    /* The body is tiny, so read the lot and let tz_parse_response find the
+     * field rather than tracking where the headers end. */
+    char buf[512];
+    size_t n = 0;
+    const uint32_t deadline = millis() + TZ_LOOKUP_TIMEOUT_MS;
+    while (client.connected() && n < sizeof(buf) - 1 && millis() < deadline) {
+        const int c = client.read();
+        if (c < 0) {
+            delay(10);
+            continue;
+        }
+        buf[n++] = (char)c;
+    }
+    buf[n] = '\0';
+    client.stop();
+
+    return tz_parse_response(buf, out, out_len);
+}
+
 static void sync_clock(void)
 {
-    configTzTime(DEVICE_TZ, NTP_SERVER_1, NTP_SERVER_2);
+    /*
+     * Cached first: the lookup is a setup-time cost, not a per-boot one, and
+     * a device that has been provisioned should not depend on a third party
+     * being reachable to know what day it is.
+     */
+    char tz[TZ_MAX_LEN];
+    if (!settings_get_timezone(tz, sizeof(tz))) {
+        if (lookup_timezone(tz, sizeof(tz))) {
+            settings_set_timezone(tz);
+            Serial.printf("timezone: %s (resolved)\n", tz);
+        } else {
+            snprintf(tz, sizeof(tz), "%s", TZ_FALLBACK);
+            Serial.printf("timezone: lookup failed, using %s\n", tz);
+        }
+    } else {
+        Serial.printf("timezone: %s (cached)\n", tz);
+    }
+
+    configTzTime(tz, NTP_SERVER_1, NTP_SERVER_2);
 
     /* Wait briefly. A device that cannot reach NTP still runs -- it just
      * cannot bucket history yet, and says so rather than inventing days. */
