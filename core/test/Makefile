@@ -5,8 +5,8 @@
 #   make clean
 #
 # The screen tests link real LVGL and render into an offscreen framebuffer, so
-# they need managed_components/ to be present. Run `idf.py reconfigure` in
-# firmware/ first if it is missing.
+# they need the LVGL source. It arrives with the firmware's dependencies:
+# run `pio pkg install` in firmware-c6/ first if it is missing.
 
 CC      ?= cc
 CFLAGS  := -std=c11 -Wall -Wextra -Werror -g -O0 -I ../include
@@ -32,10 +32,9 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../include -I ../fonts \
 
 DEPS := ../include/hero_size.h ../include/layout.h ../include/baseline.h
 
-CJSON := $(HOME)/esp/esp-idf/components/json/cJSON
 LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_jsonstream test_wifi_retry test_invoices
 SCREEN_BIN  := test_screens
-BINS        := $(LOGIC_BINS) test_stripe_parse $(SCREEN_BIN)
+BINS        := $(LOGIC_BINS) $(SCREEN_BIN)
 
 .PHONY: all test quick clean
 
@@ -56,20 +55,11 @@ test_screens: test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
               ../src/baseline.c $(FONT_SRCS) lv_conf.h $(DEPS)
 	@if [ -z "$(LV_SRCS)" ]; then \
 	  echo "error: LVGL not found at $(LVGL)"; \
-	  echo "run 'idf.py reconfigure' in firmware/ to fetch components"; \
+	  echo "run 'pio pkg install' in firmware-c6/ to fetch it"; \
 	  exit 1; \
 	fi
 	$(CC) $(LV_CFLAGS) -o $@ \
 	  test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
-	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
-
-# Design mock: renders the MRR screen through real LVGL and the real C6
-# fonts/layout at 480x480, for judging a layout before it costs a flash cycle.
-# Not part of `make` or the suite -- it asserts nothing.
-mock_mrr: mock_mrr.c harness.c ../src/hero_size.c ../src/baseline.c \
-          $(FONT_SRCS) lv_conf.h $(DEPS)
-	$(CC) $(LV_CFLAGS) \
-	  -o $@ mock_mrr.c harness.c ../src/screens.c ../src/hero_size.c \
 	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
 
 test_invoices: test_invoices.c ../src/invoices.c ../include/invoices.h
@@ -111,9 +101,6 @@ test_mrr: test_mrr.c ../src/mrr.c ../include/mrr.h
 test_format: test_format.c ../src/format.c ../src/hero_size.c
 	$(CC) $(CFLAGS) -o $@ test_format.c ../src/format.c ../src/hero_size.c
 
-test_stripe_parse: test_stripe_parse.c ../src/stripe_parse.c ../src/mrr.c
-	$(CC) -std=c11 -w -O0 -I ../include -I $(CJSON) -o $@ \
-	  test_stripe_parse.c ../src/stripe_parse.c ../src/mrr.c $(CJSON)/cJSON.c
 
 test_freshness: test_freshness.c ../src/freshness.c ../include/freshness.h
 	$(CC) $(CFLAGS) -o $@ test_freshness.c ../src/freshness.c

@@ -96,7 +96,8 @@ and the host suite still passes 1,526 checks across 27 suites.
 ## Working reference builds
 
 - Waveshare example, cloned and confirmed working on this board:
-  `/Users/cosjef/Development/ws_test/repo/02_Example/ESP-IDF-v5.5.3/09_LVGL_V9_Test`
+  `02_Example/ESP-IDF-v5.5.3/09_LVGL_V9_Test` in
+  waveshareteam/ESP32-C6-Touch-AMOLED-2.16
 - Their BSP is vendored into `firmware/components/ws_bsp/` (unmodified).
   `display.cpp` delegates to it entirely.
 - [Clawdmeter](https://github.com/HermannBjorgvin/Clawdmeter) — Arduino_GFX,

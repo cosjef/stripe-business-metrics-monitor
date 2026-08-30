@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 108 px
  * Bpp: 4
- * Opts: --font /Users/cosjef/Development/stripe_device/firmware/tools/fonts/RobotoCondensed-Bold.ttf --size 108 --bpp 4 --format lvgl --range 0x20-0x7A --no-compress --lv-include lvgl.h --lv-font-name stripe_sans_108 -o /Users/cosjef/Development/stripe_device/firmware/main/fonts/stripe_sans_108.c
+ * Opts: --font core/tools/fonts/RobotoCondensed-Bold.ttf --size 108 --bpp 4 --format lvgl --range 0x20-0x7A --no-compress --lv-include lvgl.h --lv-font-name stripe_sans_108 -o core/fonts/stripe_sans_108.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
