@@ -1,8 +1,8 @@
 # Stripe Business Metrics Monitor
 
-A small desktop device that shows your business health at a glance. It sits
-in your peripheral vision and tells you without being asked. No dashboard to
-browse to.
+A small desktop device that shows your business health at a glance. It lives
+in your peripheral vision, so the numbers find you instead of the other way
+around. No dashboard to browse to.
 
 ![MRR](docs/img/mrr.png)
 
