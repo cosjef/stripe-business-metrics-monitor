@@ -123,7 +123,7 @@ static int fetch_page(NetworkClientSecure &client, jsonstream_t *js,
     client.printf("Host: %s\r\n", STRIPE_HOST);
     client.printf("Authorization: Bearer %s\r\n", s_key);
     /* Identify the client, as Stripe asks integrations to. */
-    client.print("User-Agent: stripe-revenue-display/0.4 (esp32-c6)\r\n");
+    client.print("User-Agent: stripe-metrics-monitor/0.4 (esp32-c6)\r\n");
     /* No keep-alive: one page per connection keeps the socket state simple,
      * and pagination past the first page is rare. */
     client.print("Connection: close\r\n");
@@ -213,7 +213,7 @@ stripe_fetch_result_t stripe_fetch_failed(stripe_failed_t *out)
     client.printf("GET /v1/invoices?status=open&limit=100 HTTP/1.1\r\n");
     client.printf("Host: %s\r\n", STRIPE_HOST);
     client.printf("Authorization: Bearer %s\r\n", s_key);
-    client.print("User-Agent: stripe-revenue-display/0.4 (esp32-c6)\r\n");
+    client.print("User-Agent: stripe-metrics-monitor/0.4 (esp32-c6)\r\n");
     client.print("Connection: close\r\n");
     client.print("Accept: application/json\r\n\r\n");
 

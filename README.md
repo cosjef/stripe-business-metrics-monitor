@@ -1,7 +1,7 @@
 # Stripe Business Metrics Monitor
 
 A small desktop device that shows your business health at a glance. It lives
-in your peripheral vision, so the numbers find *you* instead of the other way
+in your peripheral vision, so the numbers find you instead of the other way
 around.
 
 ![MRR](docs/img/mrr.png)
@@ -22,7 +22,7 @@ days, combining growth and churn into one number.
 **What needs your attention:** Failed payments, how much revenue is at risk,
 and when Stripe will retry them.
 
-Your revenue data goes to Stripe and nowhere else. There's nothing to solder
+It reads from Stripe and sends your data nowhere. There's nothing to solder
 and no firmware to write. Buy a Waveshare ESP32-C6 board, flash it over USB,
 then finish setup from your phone over Wi-Fi.
 
