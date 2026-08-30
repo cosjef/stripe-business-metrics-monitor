@@ -32,7 +32,7 @@ LV_CFLAGS := -std=c11 -w -O0 -I . -I ../include -I ../fonts \
 
 DEPS := ../include/hero_size.h ../include/layout.h ../include/baseline.h
 
-LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_jsonstream test_wifi_retry test_invoices
+LOGIC_BINS  := test_hero_size test_font_coverage test_layout test_tapdetect test_tapstatus test_provision test_stripe_key test_mrr test_format test_freshness test_events test_rotation test_cache test_state test_battery test_orientation test_geometry test_layout_c6 test_history test_sparkline test_jsonstream test_wifi_retry test_invoices test_fetch_result
 SCREEN_BIN  := test_screens
 BINS        := $(LOGIC_BINS) $(SCREEN_BIN)
 
@@ -61,6 +61,11 @@ test_screens: test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
 	$(CC) $(LV_CFLAGS) -o $@ \
 	  test_screens.c harness.c ../src/screens.c ../src/hero_size.c \
 	  ../src/baseline.c $(FONT_SRCS) $(LV_SRCS)
+
+test_fetch_result: test_fetch_result.cpp ../src/fetch_result.cpp \
+                   ../../firmware-c6/src/stripe_fetch.h
+	$(CXX) $(CXXFLAGS) -I../../firmware-c6/src -I../include -o $@ \
+	    test_fetch_result.cpp ../src/fetch_result.cpp
 
 test_invoices: test_invoices.c ../src/invoices.c ../include/invoices.h
 	$(CC) $(CFLAGS) -o $@ test_invoices.c ../src/invoices.c

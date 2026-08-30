@@ -58,19 +58,8 @@ void stripe_fetch_set_key(const char *key)
     snprintf(s_key, sizeof(s_key), "%s", key ? key : "");
 }
 
-const char *stripe_fetch_strerror(stripe_fetch_result_t r)
-{
-    switch (r) {
-    case STRIPE_FETCH_OK:           return "ok";
-    case STRIPE_FETCH_NO_KEY:       return "no key";
-    case STRIPE_FETCH_NO_NETWORK:   return "no network";
-    case STRIPE_FETCH_TLS_FAILED:   return "tls failed";
-    case STRIPE_FETCH_UNAUTHORIZED: return "unauthorized";
-    case STRIPE_FETCH_HTTP_ERROR:   return "http error";
-    case STRIPE_FETCH_BAD_RESPONSE: return "bad response";
-    }
-    return "unknown";
-}
+/* stripe_fetch_strerror lives in core/src/fetch_result.c so the host tests
+ * can reach it without Arduino networking. */
 
 /*
  * Read the status line and headers, returning the HTTP status code.
@@ -142,8 +131,14 @@ static int fetch_page(NetworkClientSecure &client, jsonstream_t *js,
 
     const int status = read_status_and_headers(client);
     if (status < 0) {
+        /* The handshake succeeded and the request went out; the failure is in
+         * reading the response -- a dropped connection or a read timeout. That
+         * is a different fault from a TLS failure, so report it as one. */
+        Serial.printf("stripe: no response (connected=%d heap largest=%u)\n",
+                      (int)client.connected(),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         client.stop();
-        return -1;
+        return -2;
     }
 
     /*
@@ -329,6 +324,10 @@ stripe_fetch_result_t stripe_fetch_totals(mrr_totals_t *out, bool *truncated)
         const int status = fetch_page(client, js, cursor);
         pages++;
 
+        if (status == -2) {
+            result = STRIPE_FETCH_NO_RESPONSE;
+            break;
+        }
         if (status < 0) {
             result = STRIPE_FETCH_TLS_FAILED;
             break;

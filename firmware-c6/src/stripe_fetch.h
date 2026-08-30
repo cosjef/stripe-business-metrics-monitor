@@ -18,6 +18,10 @@ typedef enum {
     STRIPE_FETCH_NO_KEY,
     STRIPE_FETCH_NO_NETWORK,
     STRIPE_FETCH_TLS_FAILED,
+    /* Handshake succeeded and the request went out, but no usable response
+     * came back: dropped connection or read timeout. Distinct from a TLS
+     * failure, which never got a secure channel at all. */
+    STRIPE_FETCH_NO_RESPONSE,
     STRIPE_FETCH_UNAUTHORIZED,   /* 401: key revoked or wrong scope */
     STRIPE_FETCH_HTTP_ERROR,
     STRIPE_FETCH_BAD_RESPONSE,
