@@ -1041,6 +1041,7 @@ static bool lookup_timezone(char *out, size_t out_len)
     client.setTimeout(TZ_LOOKUP_TIMEOUT_MS / 1000);
 
     if (!client.connect(TZ_LOOKUP_HOST, 80)) {
+        Serial.printf("tz: connect failed (wifi=%d)\n", (int)WiFi.status());
         return false;
     }
 
@@ -1054,7 +1055,11 @@ static bool lookup_timezone(char *out, size_t out_len)
     char buf[512];
     size_t n = 0;
     const uint32_t deadline = millis() + TZ_LOOKUP_TIMEOUT_MS;
-    while (client.connected() && n < sizeof(buf) - 1 && millis() < deadline) {
+    /* Drain while connected OR while bytes remain buffered: the server
+     * closes as soon as it has written, so connected() goes false with the
+     * body still unread. */
+    while ((client.connected() || client.available()) &&
+           n < sizeof(buf) - 1 && millis() < deadline) {
         const int c = client.read();
         if (c < 0) {
             delay(10);
@@ -1067,6 +1072,7 @@ static bool lookup_timezone(char *out, size_t out_len)
 
     int offset = 0;
     if (!tz_parse_offset(buf, &offset)) {
+        Serial.printf("tz: no offset in %u bytes\n", (unsigned)n);
         return false;
     }
     return tz_format_offset(offset, out, out_len);
