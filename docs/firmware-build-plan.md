@@ -1,14 +1,25 @@
 # Firmware Build Plan
 
-State of the ESP32-C6 build, against
-[stripe-business-metrics-spec.md](stripe-business-metrics-spec.md). For how the
-device came to be on Arduino rather than ESP-IDF, and the hardware facts that
-cost the most to establish, see [C6-HANDOFF.md](C6-HANDOFF.md).
+State of the ESP32-C6 build.
 
-The original ESP32-S3 plan this replaced is in git history
-(`git log -- docs/firmware-build-plan.md`). Its stages are complete on a
-device the repository no longer contains, and mixing them with this one made
-both harder to read.
+The pin assignments that contradict Waveshare's own documentation are
+recorded where they are used, in `firmware-c6/src/board.h`. Earlier design
+and port documents were removed once the port landed; they are in git
+history if a decision ever needs re-tracing.
+
+## Development gotchas
+
+Two hardware behaviours cost real time and are not obvious from any
+datasheet:
+
+- **With a battery connected, `esptool --after hard_reset` does not reboot
+  the board.** The PMIC holds power, so a flash lands but never boots and
+  the panel keeps showing the previous build. Unplug the cell during
+  development, or force a reset with
+  `esptool --after hard_reset read_mac`.
+- **Serial capture needs DTR and RTS held false** before reading, or the
+  chip sits in reset and the port returns nothing at all. This looks
+  exactly like a dead board.
 
 ---
 
@@ -81,7 +92,7 @@ Eastern time.
 ## Deliberately not built
 
 Each of these was investigated and declined; the reasoning is in
-[C6-HANDOFF.md](C6-HANDOFF.md) so it is not re-proposed.
+git history so it is not re-proposed.
 
 - **Tap-to-advance via the IMU.** Built for the S3 and removed: corrupt I2C
   reads decode as large accelerations, and every filter that removed the false

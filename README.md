@@ -278,12 +278,10 @@ Otherwise text sizing will silently disagree with what LVGL renders.
 
 ### Hardware notes
 
-Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h).
-Several contradict Waveshare's own example (`LCD_CS` is GPIO15, not the 5
-their ESP-IDF sample documents), and
-[docs/C6-HANDOFF.md](docs/C6-HANDOFF.md) records how each was established,
-along with an earlier ESP-IDF attempt that never drove the panel past its
-opening frame.
+Pin assignments are in [firmware-c6/src/board.h](firmware-c6/src/board.h),
+which also records why several contradict Waveshare's own example. `LCD_CS`
+is GPIO15, not the 5 their ESP-IDF sample documents, and a wrong CS is
+silent: every init step still reports success because nothing is listening.
 
 ### Known limitations
 
