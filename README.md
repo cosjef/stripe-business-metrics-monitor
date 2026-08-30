@@ -7,7 +7,9 @@ and talks to nothing except the Stripe API.
 ## The deck
 
 Eight screens, five seconds each. A screen with nothing to say hides itself,
-so the rotation is only ever as long as the account warrants.
+so the rotation is only ever as long as the account warrants. The ninth tile
+below is not a screen but a state -- what the deck shows when it can no longer
+vouch for a figure.
 
 | | | |
 |:--:|:--:|:--:|
@@ -34,6 +36,37 @@ A few of the decisions they show:
   is drawn, an ARPU comparison needs six customers on each side, and a figure
   it cannot vouch for is shown as stale rather than presented as current.
 
+## Setting one up
+
+Flash the board, then everything else happens on your phone. There are no
+credentials at build time and nothing to edit before flashing.
+
+![Setup](docs/img/setup.png)
+
+1. **Power the board.** With nothing stored it comes up in setup mode and
+   starts an open access point named `Setup-XXXX`, where the suffix is derived
+   from the board's MAC. The panel shows the name.
+2. **Join that network** from a phone. The captive portal should open by
+   itself; if it does not, browse to `http://192.168.4.1/`.
+3. **Give it your WiFi.** The device joins your network and comes back with
+   the key page.
+4. **Paste a Stripe restricted key.** It is validated against the live API
+   before it is stored, so a bad key fails while you are still holding the
+   phone. On success the deck appears.
+
+Credentials live in NVS and survive a reflash, so this is a one-time step. To
+start over, erase the NVS partition:
+
+```sh
+esptool --port /dev/cu.usbmodem<N> erase-region 0x9000 0x5000
+```
+
+Two things a first run will not show you immediately: the MRR trend needs
+**seven daily samples** before it draws a sparkline, and the ARPU comparison
+needs **six customers on each side** before it will call one cohort better
+than the other. Until then those screens show the figure without the
+comparison, which is deliberate -- see "The device does not guess" above.
+
 ## Hardware
 
 [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm)
@@ -49,9 +82,12 @@ their ESP-IDF sample documents — and
 ## The Stripe key
 
 The device asks for a **restricted key** (`rk_...`) during setup, and needs
-**Read** on Subscriptions and Invoices — nothing else. It never writes, and
-the key is validated against the live API before it is stored, so a wrong one
-fails while you are still holding your phone.
+**Read** on Subscriptions and Invoices — nothing else. Create one in the
+Stripe dashboard under **Developers → API keys → Create restricted key**,
+grant those two read scopes, and leave every other permission at *None*.
+
+It never writes, and the key is validated against the live API before it is
+stored, so a wrong one fails while you are still holding your phone.
 
 A key with only those two read scopes cannot move money. It can reveal your
 subscriber count and revenue, which is what the device is for.
@@ -65,7 +101,7 @@ docs/           the spec, the port plan, and the hardware notes
 ```
 
 Nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
-`freertos/*`. That single constraint is what lets 1,471 checks run on a laptop
+`freertos/*`. That single constraint is what lets 1,518 checks run on a laptop
 with no hardware and no SDK. See [core/README.md](core/README.md).
 
 ## Status
@@ -108,7 +144,7 @@ make
 for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-1,471 checks across 24 suites. Most cover pure logic — text measurement, hero
+1,518 checks across 26 suites. Most cover pure logic — text measurement, hero
 auto-sizing, MRR arithmetic, the streaming JSON scanners, rotation rules,
 freshness, battery thresholds, WiFi retry policy. One boots real LVGL against
 an offscreen framebuffer and asserts on actual pixels.
