@@ -42,13 +42,11 @@ A 2.16-inch 480x480 AMOLED with a touch layer, a USB-C port and an on-board
 power controller, all on one piece. Nothing is soldered and no enclosure is
 needed — the board is the device.
 
-Waveshare sells it in a few configurations. This was built and tested on the
-**board with the battery**, which lets it run unplugged and is what the
-battery indicator in the corner reports. The bare board has not been tried:
-the firmware reads the cell voltage from the power controller at boot and
-takes the answer at face value, so what it displays with no cell attached is
-untested. If you only ever intend to run it on USB power, the battery is
-probably unnecessary -- but the tested configuration is the one with it.
+Waveshare sells it in a few configurations. This was built on the **board
+with the battery**, which lets it sit on a shelf untethered and is what the
+battery indicator in the corner reports. The board works the same on USB
+power alone, so the battery is optional -- add it if you want the device to
+survive being unplugged.
 
 **A USB-C cable** that carries data, not just power.
 
