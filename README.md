@@ -25,9 +25,10 @@ Stripe next retries them.
 No app, no dashboard, no browser tab you forget to open. It talks to the
 Stripe API and to nothing else.
 
-There is no soldering and no enclosure to print. You buy one board, flash it
-over USB, and finish the setup on your phone. If you have never written
-firmware before, that is fine, because this page assumes you have not.
+There is no soldering and no enclosure to print. You buy a Waveshare
+ESP32-C6 board, flash it over USB, and finish setup on your phone over WiFi.
+If you have never written firmware before, that is fine, because this page
+assumes you have not.
 
 ## What it shows
 
