@@ -37,11 +37,13 @@
 
 extern "C" {
 #include "format.h"
+#include "freshness.h"
 #include "invoices.h"
 #include "history.h"
 #include "mrr.h"
 #include "provision.h"
 #include "rotation.h"
+#include "state.h"
 #include "screens.h"
 #include "stripe_key.h"
 }
@@ -59,6 +61,13 @@ extern "C" {
  * the two calendars landing on different days, which is exactly the kind of
  * code that is wrong twice a year.
  */
+/*
+ * Force the stale screen after this many seconds, to see State A on the glass
+ * without waiting out the real fifteen-minute threshold or unplugging the
+ * router. 0 disables. Must be 0 in anything shipped.
+ */
+#define FORCE_STALE_AFTER_S 0
+
 #define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
 #define NTP_SERVER_1 "pool.ntp.org"
 #define NTP_SERVER_2 "time.nist.gov"
@@ -132,6 +141,19 @@ static uint32_t s_last_refresh;
  * over -- NVS is flash, and a five-minute poll would be thousands of writes a
  * month for a value that changes once a day.
  */
+/*
+ * Whether the numbers on screen can still be trusted.
+ *
+ * Spec 6.2 calls the stale screen the most important in the deck: a
+ * confidently displayed stale number is worse than an obviously stale one,
+ * and that is precisely how cheap dashboards fail -- freezing on a four-hour
+ * figure with no indication. Until this was wired the device did exactly
+ * that: a failed fetch left the deck rotating last-good values with nothing
+ * to say they were old.
+ */
+static freshness_t s_freshness;
+static bool s_auth_failed;
+
 static history_t s_history;
 static int32_t s_history_day = -1;   /* last epoch day recorded */
 static bool s_clock_ok;
@@ -301,9 +323,67 @@ static void update_delta(int64_t mrr_cents)
     s_has_delta = true;
 }
 
+/*
+ * Draw the stale screen: the same last-good numbers, presented as old.
+ *
+ * It deliberately keeps the pre-card panel layout. The stale screen must not
+ * look like a live one -- the visual difference IS the signal, and dressing
+ * old data in the same card the live deck uses would undo the point.
+ */
+static void draw_stale(void)
+{
+    char age[24];
+    freshness_format_age(freshness_age_ms(&s_freshness, (int64_t)millis()),
+                         age, sizeof(age));
+
+    char age_line[FIELD_LEN];
+    snprintf(age_line, sizeof(age_line), "stale | %s", age);
+
+    /* The footer says what the device is doing about it, so the reader knows
+     * whether to act or wait. */
+    char footer[FIELD_LEN];
+    snprintf(footer, sizeof(footer), "retrying");
+
+    /* MRR is the anchor metric, so that is the value shown as stale. */
+    screen_draw_stale(lv_screen_active(), s_labels[SCREEN_MRR],
+                      s_values[SCREEN_MRR].hero, age_line, footer);
+}
+
 /* `slot` indexes the visible list, not screen_id_t. */
 static void show(int slot)
 {
+    /*
+     * What to draw is a decision over device conditions, not a default. The
+     * precedence lives in state.c and is covered by 42 host checks; encoding
+     * it here with a chain of ifs is exactly how the wrong screen gets shown
+     * during the one failure the reader needed to understand.
+     */
+    device_status_t st = {};
+    st.provisioned = true;         /* setup mode never reaches show() */
+    st.auth_failed = s_auth_failed;
+    st.battery_warn = false;       /* battery is not wired yet */
+    st.stale = s_have_data &&
+               freshness_is_stale(&s_freshness, (int64_t)millis());
+#if FORCE_STALE_AFTER_S
+    if (s_have_data && millis() > (uint32_t)FORCE_STALE_AFTER_S * 1000) {
+        st.stale = true;
+    }
+#endif
+
+    switch (display_state(&st)) {
+    case DISPLAY_AUTH_ERROR:
+        screen_draw_auth_error(lv_screen_active(), "Stripe key", "rejected",
+                               "check it in the portal", "401");
+        return;
+    case DISPLAY_STALE:
+        draw_stale();
+        return;
+    case DISPLAY_SETUP:
+    case DISPLAY_BATTERY:
+    case DISPLAY_ROTATION:
+        break;
+    }
+
     if (s_visible_count <= 0) {
         return;
     }
@@ -937,11 +1017,25 @@ static void refresh(void)
 
     const stripe_fetch_result_t r = stripe_fetch_totals(&totals, &truncated);
     if (r != STRIPE_FETCH_OK) {
+        freshness_mark_failure(&s_freshness);
+        /*
+         * An auth failure is not a network problem and must not be shown as
+         * one. A revoked key drags the data stale behind it within the
+         * threshold, so both flags end up true; state.c gives auth
+         * precedence, because "there will be no more numbers" is a different
+         * instruction from "these are old".
+         */
+        if (r == STRIPE_FETCH_UNAUTHORIZED) {
+            s_auth_failed = true;
+        }
         Serial.printf("fetch failed: %s\n", stripe_fetch_strerror(r));
         /* Keep the last good values on screen rather than blanking the deck.
          * Marking them visibly stale (freshness.c) is still to port. */
         return;
     }
+
+    freshness_mark_success(&s_freshness, (int64_t)millis());
+    s_auth_failed = false;
 
     apply_totals(&totals);
     Serial.printf("fetch ok: MRR %lld cents, %d active, %d trial, "
