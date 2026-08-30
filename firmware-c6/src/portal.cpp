@@ -385,6 +385,18 @@ void portal_stop(void)
         WiFi.softAPdisconnect(true);
         WiFi.mode(WIFI_STA);
         s_ap_up = false;
+        /*
+         * Let the stack settle before anyone opens a socket.
+         *
+         * Dropping AP+STA down to STA disturbs the station connection: the
+         * first fetch afterwards completed its TLS handshake, reported the
+         * socket connected, and then read an empty status line -- the server
+         * never saw the request. It looked like a TLS fault (and was
+         * reported as one) but the channel was fine; the radio simply was
+         * not ready. A settle here fixes it for every caller rather than at
+         * whichever call site happens to fetch first.
+         */
+        delay(500);
     }
     Serial.println("portal: stopped");
 }

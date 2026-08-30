@@ -37,6 +37,7 @@
 #include "portal.h"
 #include "settings.h"
 #include "stripe_fetch.h"
+#include "refresh.h"
 
 extern "C" {
 #include "cache.h"
@@ -91,7 +92,6 @@ extern "C" {
 #define CLOCK_SANE_EPOCH 1672531200
 
 #define ROTATE_MS  5000
-#define REFRESH_MS (5 * 60 * 1000)   /* spec 7.1: poll every five minutes */
 #define JOIN_TIMEOUT_MS 30000
 
 /* Not static: battery_hw.cpp reads the cell through this same handle rather
@@ -1698,7 +1698,7 @@ void loop(void)
         show(s_slot);
     }
 
-    if (s_have_data && now - s_last_refresh >= REFRESH_MS) {
+    if (refresh_due(now, s_last_refresh, s_have_data)) {
         s_last_refresh = now;
         refresh();
     }
