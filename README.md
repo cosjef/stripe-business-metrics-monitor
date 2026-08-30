@@ -28,9 +28,7 @@ Stripe API and to nothing else.
 
 There is no soldering and no enclosure to print. You buy a Waveshare
 ESP32-C6 board, flash it over USB, and finish setup on your phone over WiFi.
-You do not write any firmware. Clone this repository, run the upload
-command, and you are done with the computer; there is nothing to edit and no
-credentials to paste into a file before you flash.
+You do not write any firmware.
 
 ## What it shows
 
@@ -167,7 +165,7 @@ each side before it will call one group better than the other. Until then
 those screens show the figure without the comparison. That is deliberate: the
 device would rather show less than guess.
 
-**Colour means something specific.** Green is a realized gain and nothing
+**Color means something specific.** Green is a realized gain and nothing
 else. Amber is a degraded state. Red is a threshold worth acting on, and the
 FAILED screen is the only one that earns it.
 
@@ -297,27 +295,6 @@ opening frame.
 
 [docs/firmware-build-plan.md](docs/firmware-build-plan.md) has the full list
 and what is deliberately not built.
-
-### Deviations from the spec
-
-Findings from real hardware that contradict
-[the written spec](docs/stripe-business-metrics-spec.md):
-
-1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** Inherited from
-   an IPS panel where `0x04`-`0x30` collapsed to the same mid-gray.
-   Unverified on this AMOLED, where the reasoning does not carry over. A
-   black pixel here is simply off, so the spec's `#121211` may well be
-   viable. Measure before changing it.
-
-2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace
-   spends a full character cell on `.`, shrinking digits enough to hurt
-   legibility at 50cm. Roboto Condensed has tabular figures, so it keeps the
-   anti-jitter property that motivated the monospace rule anyway.
-
-3. **Streaming JSON is kept, but not for the reason the spec gives (spec
-   8.3).** Measured with TLS open: 155KB free and a 131KB largest block,
-   where buffer-then-parse fits. It is kept because it is O(1) in account
-   size, not because it is required.
 
 ## License
 

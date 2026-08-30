@@ -2,12 +2,35 @@
 
 **Design and build specification for a desk revenue instrument**
 
-> Written for a 1.54" 240x240 LCD, which was the original hardware. The
-> principles -- legibility in millimetres at 50cm, one fact per screen, the
-> colour discipline, never displaying a figure the device cannot vouch for --
-> carried over to the 480x480 AMOLED unchanged. The pixel dimensions did not;
-> where this document names a size, see `core/include/layout_c6.h` for the
-> value in use and `core/src/geometry.c` for how it was derived.
+> **This is a historical document.** It was written for the original
+> hardware, a 1.54" 240x240 IPS LCD driven by an ESP32-S3. The device now
+> ships on a 2.16" 480x480 AMOLED driven by an ESP32-C6, so every pixel
+> dimension, density figure and panel reference below describes hardware
+> that is no longer used. They are kept because the legibility maths in
+> section 2 derives from them, and rewriting the inputs would break the
+> reasoning that produced the type sizes still in use.
+>
+> The principles carried over unchanged: legibility in millimetres at 50cm,
+> one fact per screen, the color discipline, and never displaying a figure
+> the device cannot vouch for. The numbers did not. For current values see
+> `core/include/layout_c6.h`, and `core/src/geometry.c` for how they were
+> derived.
+>
+> Where this document and the code disagree, the code is right. Three
+> deliberate departures are worth naming:
+>
+> 1. **Background is `#000000`, not `#121211` (4.1/3.1).** Inherited from an
+>    IPS panel where `0x04`-`0x30` collapsed to the same mid-gray. Unverified
+>    on AMOLED, where a black pixel is simply off, so `#121211` may well be
+>    viable. Measure before changing it.
+> 2. **Typeface is Roboto Condensed, not monospace (5.4).** Monospace spends
+>    a full character cell on `.`, shrinking digits enough to hurt legibility
+>    at 50cm. Roboto Condensed has tabular figures, so it keeps the
+>    anti-jitter property that motivated the rule.
+> 3. **Streaming JSON is kept, but not for the reason given (8.3).** Measured
+>    with TLS open: 155KB free and a 131KB largest block, where
+>    buffer-then-parse fits. It is kept because it is O(1) in account size,
+>    not because it is required.
 
 Version 1.0 | August 2026
 
