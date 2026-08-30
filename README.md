@@ -1,116 +1,126 @@
 # Stripe Revenue Display
 
 Firmware for a single-purpose desk instrument that shows live Stripe revenue
-metrics on a 1.54" 240x240 LCD. It answers one question at a time, in numbers
-readable across a room, and talks to nothing except the Stripe API.
+metrics. It answers one question at a time, in numbers readable across a room,
+and talks to nothing except the Stripe API.
 
 Not affiliated with Stripe.
 
+## Two products, one core
+
+```
+core/           portable: rendering, MRR maths, parsers, fonts, tests
+firmware-s3/    Waveshare ESP32-S3-LCD-1.54  (240x240 ST7789, ESP-IDF)
+firmware-c6/    Waveshare ESP32-C6 AMOLED 2.16 (480x480 CO5300, Arduino)
+```
+
+Both products compile the same `core/` sources. Neither depends on the other,
+and nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
+`freertos/*` — that constraint is what lets the whole thing be tested on a
+laptop. See [core/README.md](core/README.md).
+
 ## Status
 
-Stages 1-3 of 8 complete: display bring-up, the full screen deck, and WiFi
-provisioning. All nine screens (six rotating metrics, three device states)
-render from fixture data, rotating every 8 seconds on hardware, with
-tap-to-advance navigation via the onboard IMU.
+**firmware-c6** is the active build and shows live data. It provisions itself
+over a captive portal, stores credentials in NVS, fetches from Stripe over
+TLS with a pinned CA, and rotates eight screens: MRR, new paid, paid subs,
+cancelled, annual run rate, ARPU, net 30-day, and failed payments. Screens
+with nothing to say hide themselves. Buttons and touch move the deck; the
+battery shows in the label row; a failed fetch surfaces the stale screen
+rather than presenting old numbers as current.
 
-On first boot the device opens a `Setup-XXXX` access point with a captive
-portal that auto-opens on a phone; once provisioned it stores credentials in
-NVS and joins the network. Metric values are still fixtures — live Stripe data
-comes in Stages 4-6.
+**firmware-s3** is the original ESP-IDF build for the 240x240 board. It works,
+and `main` holds it. The C6 was attempted in ESP-IDF first and never drove the
+panel past its first frame; [C6-HANDOFF.md](C6-HANDOFF.md) records that
+failure and the bisect that could not find it.
 
-Tap navigation ships with a known trade-off: it reliably detects taps but
-occasionally advances on its own (roughly once per 20s idle). See the build
-plan for why, and why the PLUS button would be the robust fix.
-
-See [firmware-build-plan.md](firmware-build-plan.md) for the staged plan and
-progress, and [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md)
-for the design specification this is built from.
-
-## Hardware
-
-Waveshare ESP32-S3-LCD-1.54 (non-touch): ESP32-S3R8, 8MB PSRAM, 16MB flash,
-ST7789 240x240 IPS panel over SPI at 40MHz.
-
-Pin assignments are in [firmware-s3/main/board_config.h](firmware-s3/main/board_config.h),
-taken from Waveshare's own ESP-IDF example for this board.
+See [stripe-revenue-display-spec.md](stripe-revenue-display-spec.md) for the
+design this is built from.
 
 ## Building
 
-Requires ESP-IDF 5.4 or newer (developed against 5.5.1).
+**C6 (PlatformIO):**
+
+```sh
+cd firmware-c6
+pio run
+pio run -t upload --upload-port /dev/cu.usbmodem<N>
+```
+
+**S3 (ESP-IDF 5.4+):**
 
 ```sh
 . $IDF_PATH/export.sh
-cd firmware
+cd firmware-s3
 idf.py set-target esp32s3
 idf.py build
 idf.py -p /dev/cu.usbmodem<N> flash monitor
 ```
 
+The C6 needs no credentials at build time: it provisions over its own access
+point. The serial port name changes between replugs — check
+`ls /dev/cu.usbmodem*` first.
+
 ## Tests
 
-Sizing and layout logic is pure arithmetic with no ESP-IDF dependency, so it
-runs on the host:
+Everything portable is tested on the host, with no hardware and no SDK:
 
 ```sh
 cd core/test
 make
+for t in ./test_*; do [ -x "$t" ] && $t; done
 ```
 
-699 checks across seven suites. Six cover pure logic (text measurement, hero
-auto-sizing, baseline positioning, font coverage, palette constraints, tap
-detection, IMU register decoding, and WiFi credential validation); the seventh
-boots real LVGL against an
-offscreen framebuffer and asserts on actual pixels — background color, ink
-position, rotation dot state, and color discipline for all nine screens.
+1,591 checks across 28 suites. Most cover pure logic — text measurement, hero
+auto-sizing, MRR arithmetic, the streaming JSON scanners, rotation rules,
+freshness, battery thresholds, WiFi retry policy. One boots real LVGL against
+an offscreen framebuffer and asserts on actual pixels.
 
-`make quick` skips the LVGL build and runs only the logic suites.
+`make quick` skips the LVGL build and runs only the logic suites. LVGL itself
+arrives with the ESP-IDF component manager: `cd firmware-s3 && idf.py
+reconfigure`.
 
-Panel bring-up itself (`display.c`: SPI, ST7789 init, backlight) is not
-covered — it needs real hardware.
+Panel bring-up, the radios and the I2C peripherals are not covered — they need
+real hardware, and every claim about them in the docs was checked against a
+register read rather than a datasheet.
 
 ## Regenerating fonts
 
-The LVGL bitmap fonts in `core/fonts/` are generated from the vendored
-Roboto Condensed TTF. Regenerate them with:
-
 ```sh
-cd firmware
-./tools/gen_fonts.sh          # needs npx (lv_font_conv)
+cd core/tools
+./gen_fonts.sh            # needs npx (lv_font_conv)
 ```
 
-If you change the face or weight, you **must** also regenerate the glyph
-advance table in `main/hero_size.c`:
+If you change the face or weight you **must** also regenerate the glyph
+advance table in `core/src/hero_size.c`:
 
 ```sh
-./tools/dump_advances.py      # needs Pillow
+./dump_advances.py        # needs Pillow
 ```
 
-Otherwise text sizing will silently disagree with what LVGL actually renders.
+Otherwise text sizing will silently disagree with what LVGL renders.
 
 ## Notable deviations from the spec
 
-Three findings from bringing this up on real hardware contradict the written
-spec. All are documented with reasoning in
-[firmware-build-plan.md](firmware-build-plan.md):
+Findings from real hardware that contradict the written spec:
 
-1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** This panel's
-   response is nearly a step function at the bottom: `0x00` is truly black,
-   but `0x04` has already jumped to visible gray, and `0x04`-`0x30` collapse
-   together. `#121211` renders mid-gray. `main/colortest.c` reproduces the
-   measurement.
+1. **Background is `#000000`, not `#121211` (spec 4.1/3.1).** On the S3's IPS
+   panel `0x04`-`0x30` collapse to the same mid-gray, so `#121211` renders
+   grey rather than near-black. Measured with `colortest.c`. Unverified on the
+   C6's AMOLED, where the reasoning does not carry over — a black pixel there
+   is simply off.
 
-2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace spends
-   a full character cell on `.`, shrinking digits enough to hurt legibility at
-   50cm. Roboto Condensed renders `$6.5k` at 88px (10.1mm, "across the room" in
-   the spec 2.2 table) where monospace managed 60px. It also has tabular figures
-   — all digits advance 505/1000 em — so it keeps the anti-jitter property that
-   motivated the monospace rule in the first place.
+2. **Typeface is Roboto Condensed, not monospace (spec 5.4).** Monospace
+   spends a full character cell on `.`, shrinking digits enough to hurt
+   legibility at 50cm. Roboto Condensed has tabular figures, so it keeps the
+   anti-jitter property that motivated the monospace rule anyway.
 
-3. **Full-buffer JSON parsing is probably viable (spec 8.3).** The spec assumes
-   ~320KB of heap and mandates streaming parses; this board reports 8MB PSRAM.
-   To be confirmed at Stage 5.
+3. **Streaming JSON is kept, but not for the reason the spec gives (spec
+   8.3).** Measured on the C6 under Arduino with TLS open: 155KB free and a
+   131KB largest block, where buffer-then-parse fits. It is kept because it is
+   O(1) in account size, not because it is required.
 
 ## License
 
 Roboto Condensed is used under the SIL Open Font License; see
-[firmware/tools/fonts/LICENSE-RobotoCondensed.txt](firmware/tools/fonts/LICENSE-RobotoCondensed.txt).
+[core/tools/fonts/LICENSE-RobotoCondensed.txt](core/tools/fonts/LICENSE-RobotoCondensed.txt).

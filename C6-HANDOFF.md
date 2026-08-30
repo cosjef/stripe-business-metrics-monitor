@@ -201,7 +201,7 @@ cd test && make && for t in ./test_*; do [ -x "$t" ] && $t; done
 probe screen shows a label, a green bar and a counter incrementing once a
 second. This is what the ESP-IDF build could never do past frame one.
 
-New tree: `arduino/`, a PlatformIO project. `firmware/` (ESP-IDF) is untouched.
+New tree: `firmware-c6/`, a PlatformIO project. `firmware-s3/` (ESP-IDF) is untouched.
 
 **What made the difference.** Two things the IDF path never did, both taken
 from Clawdmeter's `waveshare_amoled_216_c6` env, which runs on this exact
@@ -252,8 +252,8 @@ Confirmed on the glass: all nine screens cycling every 5s at C6 geometry
 
 **The rendering core is shared, not copied.** `platformio.ini` compiles
 `screens.c`, `hero_size.c`, `baseline.c` and `fonts/` directly out of
-`firmware/main/` via `build_src_filter`. Both builds therefore run the same
-code, and the host suite in `firmware/test` keeps covering what ships. The
+`core/src/` via `build_src_filter`. Both builds therefore run the same
+code, and the host suite in `core/test` keeps covering what ships. The
 fonts alone are 8.6MB of source; there should be exactly one copy.
 
 **Target selection needed fixing in two places.** `layout.h` and
@@ -327,5 +327,66 @@ rejected. It renders well and the data is real, but tiers change only when
 the owner reprices -- perhaps twice a year. A glanceable device should
 spend its space on what moves. Kept here so the idea is not re-proposed.
 
-The mock lives in `firmware/test/mock_mrr.c` (render_subs) if it is ever
+The mock lives in `core/test/mock_mrr.c` (render_subs) if it is ever
 wanted.
+
+
+---
+
+## Orientation: the panel is 90 degrees off at rotation 0
+
+`Arduino_CO5300` takes quarter turns, and this enclosure needs **3**. At 0 the
+image renders 90 degrees off the case.
+
+This went unnoticed through the entire UX rebuild. Every screen signed off
+along the way -- the cards, the flow bars, the battery glyph, the stale screen
+-- was being read sideways, because a square panel full of left-aligned text
+looks like a plausible UI at any quarter turn. `orientation.h` warned about
+exactly this: an upside-down display is obvious, a transposed one is not.
+
+**What found it.** A corner-marked test pattern: four different labels, one per
+corner, plus a centre line that must read left to right. Asymmetric on both
+axes, so any rotation or mirror is legible rather than merely plausible.
+Nothing symmetric would have shown it, and "it looks right" had held for days.
+
+It lives in `firmware-c6/src/main.cpp` behind `ORIENTATION_TEST_S`, set to 0.
+Leave it there. It costs nothing and it is the only thing that settles this
+question; the next enclosure or panel revision will want it.
+
+**The reference frame nearly cost more than the bug.** The first instruction
+said to hold the device with the USB cable at the top. It sits with the cable
+on the RIGHT. Judged in that wrong frame the pattern produced two confident and
+contradictory conclusions in a row -- first that rotation 0 was broken, then
+that it had been right all along and the fix had broken it. Only a photograph
+taken in the real orientation settled it.
+
+A test that specifies the wrong reference frame is worse than no test: it
+yields wrong answers with exactly the confidence of right ones.
+
+## Current state of firmware-c6
+
+Live and working: captive-portal provisioning into NVS, Stripe fetch over TLS
+with a pinned CA, eight rotating screens, cached values on boot, the stale
+screen when data ages out, battery sensing and its glyph, WiFi reconnection,
+buttons and touch.
+
+Verified against the live account rather than assumed -- MRR, subscriber flow,
+at-risk revenue and failed payments each matched an independent API query at
+the time they were built.
+
+Deliberately not built:
+
+- **IMU tap-to-advance.** Built for the S3 and removed there: corrupt I2C
+  reads decode as large accelerations, a real tap lands in one 20ms sample,
+  and every filter that removed the false triggers also rejected real taps --
+  8 phantom advances in 60 seconds sitting untouched. `tapdetect.c` and
+  `tapstatus.c` keep their 69 and 337 checks and stay unwired.
+- **The MRR sparkline.** Declined; see above.
+- **Trials and conversion screens.** Correctly hidden: the account has no
+  trials, and one trial ever makes a conversion rate misleading at any value.
+
+Still open:
+
+- `events.c` is unported -- "today's" deltas rather than 30-day windows.
+- The layouts were designed and judged while the panel was rotated. They are
+  worth re-reading now that it is upright.
