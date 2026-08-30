@@ -29,6 +29,7 @@
 #include <esp_mac.h>
 #include <lvgl.h>
 
+#include "battery_hw.h"
 #include "board.h"
 #include "display.h"
 #include "portal.h"
@@ -80,7 +81,9 @@ extern "C" {
 #define REFRESH_MS (5 * 60 * 1000)   /* spec 7.1: poll every five minutes */
 #define JOIN_TIMEOUT_MS 30000
 
-static XPowersPMU s_pmu;
+/* Not static: battery_hw.cpp reads the cell through this same handle rather
+ * than opening a second one. */
+XPowersPMU s_pmu;
 
 /* What the device is doing, which decides what the screen shows. */
 typedef enum {
@@ -165,6 +168,9 @@ static bool s_auth_failed;
  * screen exists to prevent.
  */
 static bool s_from_cache;
+
+/* Latest battery reading, refreshed on the rotation tick. */
+static battery_reading_t s_battery;
 
 static history_t s_history;
 static int32_t s_history_day = -1;   /* last epoch day recorded */
@@ -373,7 +379,14 @@ static void show(int slot)
     device_status_t st = {};
     st.provisioned = true;         /* setup mode never reaches show() */
     st.auth_failed = s_auth_failed;
-    st.battery_warn = false;       /* battery is not wired yet */
+    /*
+     * Low enough to act on. CHARGING and UNKNOWN are deliberately not
+     * warnings: a device on USB is fine, and an implausible reading means the
+     * sensor is wrong rather than the cell -- warning then would send the
+     * owner to charge a device that is not low.
+     */
+    st.battery_warn = (s_battery.level == BATTERY_LOW ||
+                       s_battery.level == BATTERY_CRITICAL);
     st.stale = s_have_data &&
                freshness_is_stale(&s_freshness, (int64_t)millis());
 #if FORCE_STALE_AFTER_S
@@ -390,8 +403,17 @@ static void show(int slot)
     case DISPLAY_STALE:
         draw_stale();
         return;
+    case DISPLAY_BATTERY: {
+        const bool critical = (s_battery.level == BATTERY_CRITICAL);
+        char pct[16], volts[24];
+        snprintf(pct, sizeof(pct), "%d%%", s_pmu.getBatteryPercent());
+        snprintf(volts, sizeof(volts), "%d mV", s_battery.cell_mv);
+        screen_draw_battery(lv_screen_active(), pct,
+                            critical ? "plug in now" : "charge soon",
+                            volts, critical);
+        return;
+    }
     case DISPLAY_SETUP:
-    case DISPLAY_BATTERY:
     case DISPLAY_ROTATION:
         break;
     }
@@ -1151,6 +1173,12 @@ static void refresh(void)
     Serial.printf("flow money: +%lld / -%lld cents, net %+lld\n",
                   (long long)totals.new_cents, (long long)totals.churned_cents,
                   (long long)(totals.new_cents - totals.churned_cents));
+    /* Read here rather than reporting s_battery: the rotation tick populates
+     * that, and the first fetch runs before the first tick, so logging the
+     * cached value printed 0 mV on boot. */
+    battery_hw_read(&s_battery);
+    Serial.printf("battery: %d mV, %s\n", s_battery.cell_mv,
+                  s_battery.charging ? "charging" : "on cell");
     Serial.printf("new paid pace: this=%d prior=%d\n",
                   totals.new_count, totals.prior_new_count);
     Serial.printf("arpu mix: comparable=%d joining=%lld leaving=%lld\n",
@@ -1493,6 +1521,9 @@ void loop(void)
 
     if (now - last_rotate >= ROTATE_MS) {
         last_rotate = now;
+        /* Cheap I2C read; once per rotation is far more often than a cell
+         * changes level, and it keeps the warning responsive. */
+        battery_hw_read(&s_battery);
         /*
          * Wrap on the VISIBLE count, not SCREEN_COUNT.
          *
