@@ -36,6 +36,7 @@
 #include "stripe_fetch.h"
 
 extern "C" {
+#include "cache.h"
 #include "format.h"
 #include "freshness.h"
 #include "invoices.h"
@@ -153,6 +154,17 @@ static uint32_t s_last_refresh;
  */
 static freshness_t s_freshness;
 static bool s_auth_failed;
+
+/*
+ * Whether the values on screen came from flash rather than the network.
+ *
+ * Kept because restored values must never be presented as live. They are
+ * shown with their real age, so the freshness machinery treats them as data
+ * of that age and the stale screen takes over if they are too old -- a
+ * cached figure displayed confidently is exactly the failure the stale
+ * screen exists to prevent.
+ */
+static bool s_from_cache;
 
 static history_t s_history;
 static int32_t s_history_day = -1;   /* last epoch day recorded */
@@ -1010,6 +1022,97 @@ static bool join_wifi(const char *ssid, const char *pass, uint32_t timeout_ms)
     return false;
 }
 
+/*
+ * Write the last-good values to flash.
+ *
+ * Only after a successful fetch, and only with a real clock: a cache stamped
+ * 1970 would read as a day old the moment it was restored, and
+ * cache_too_old() would throw away perfectly good data.
+ */
+static void save_cache(const mrr_totals_t *t)
+{
+    const time_t now = time(NULL);
+    if (now < CLOCK_SANE_EPOCH) {
+        return;
+    }
+
+    cache_t c = {};
+    c.version = CACHE_VERSION;
+    c.saved_at_utc = (int64_t)now;
+    c.mrr_cents = t->mrr_cents;
+    c.active_count = t->active_count;
+    c.trial_count = t->trial_count;
+    c.churned_30d = t->churned_count;
+    c.new_paid_30d = t->new_count;
+    c.failed_count = s_failed_count;
+    c.have_invoices = s_rot_state.have_invoices;
+    c.mixed_currency = t->mixed_currency;
+    c.has_tiered = t->has_tiered;
+
+    settings_save_cache(&c, sizeof(c));
+}
+
+/*
+ * Restore last-good values so the screen is never blank on boot.
+ *
+ * The age is the point. These figures are put on screen WITH the age they
+ * actually have, by seeding freshness from the cache timestamp rather than
+ * marking a success -- so if the cache is older than the stale threshold the
+ * device shows the stale screen immediately, instead of presenting an
+ * hour-old number as current.
+ *
+ * Returns false when there is nothing usable, and the deck keeps its dashes.
+ */
+static bool restore_cache(void)
+{
+    cache_t c;
+    if (!settings_load_cache(&c, sizeof(c))) {
+        return false;
+    }
+    if (!cache_is_valid(&c)) {
+        Serial.println("cache: present but not valid, ignoring");
+        return false;
+    }
+
+    const time_t now = time(NULL);
+    if (now < CLOCK_SANE_EPOCH) {
+        /* No clock yet, so the age cannot be judged. Showing the values
+         * anyway is fine -- they are marked stale until a fetch proves
+         * otherwise. */
+        Serial.println("cache: restored, age unknown (no clock yet)");
+    } else if (cache_too_old(&c, (int64_t)now)) {
+        Serial.println("cache: too old to show");
+        return false;
+    }
+
+    mrr_totals_t t = {};
+    t.mrr_cents = c.mrr_cents;
+    t.active_count = c.active_count;
+    t.trial_count = c.trial_count;
+    t.churned_count = c.churned_30d;
+    t.new_count = c.new_paid_30d;
+    t.mixed_currency = c.mixed_currency;
+    t.has_tiered = c.has_tiered;
+
+    apply_totals(&t);
+    s_from_cache = true;
+
+    /*
+     * Seed freshness with the cache's real age rather than marking a success.
+     * millis() is near zero at boot, so the age is subtracted from now: the
+     * device believes the data is exactly as old as it is.
+     */
+    if (now >= CLOCK_SANE_EPOCH) {
+        const int64_t age_s = cache_age_seconds(&c, (int64_t)now);
+        if (age_s >= 0) {
+            s_freshness.last_success_ms = (int64_t)millis() - age_s * 1000;
+            Serial.printf("cache: restored, %lld seconds old\n",
+                          (long long)age_s);
+        }
+    }
+    return true;
+}
+
 static void refresh(void)
 {
     mrr_totals_t totals;
@@ -1036,8 +1139,10 @@ static void refresh(void)
 
     freshness_mark_success(&s_freshness, (int64_t)millis());
     s_auth_failed = false;
+    s_from_cache = false;
 
     apply_totals(&totals);
+    save_cache(&totals);
     Serial.printf("fetch ok: MRR %lld cents, %d active, %d trial, "
                   "flow +%d/-%d%s\n",
                   (long long)totals.mrr_cents, totals.active_count,
@@ -1212,6 +1317,20 @@ void setup(void)
     s_history_day = history_latest_day(&s_history);
     update_delta(0);
 
+    /*
+     * Fill the screen from flash before touching the network.
+     *
+     * This is the whole point of the cache: WiFi, NTP and the first fetch take
+     * roughly twelve seconds, and a desk instrument that is read constantly
+     * and restarted rarely should not spend that time showing dashes.
+     *
+     * The clock has not synced yet, so the age cannot be judged here. The
+     * values go up regardless and are re-aged after sync_clock() below --
+     * being briefly unable to say how old they are is not a reason to show
+     * nothing.
+     */
+    const bool had_cache = restore_cache();
+
     /* Decide the mode from what is actually stored. */
     char ssid[SETTINGS_SSID_LEN];
     char pass[SETTINGS_PASS_LEN];
@@ -1244,8 +1363,39 @@ void setup(void)
         return;
     }
 
+    /*
+     * Show the cached values now, before the fetch.
+     *
+     * join_wifi already ran, so this is the earliest point the deck can be
+     * drawn with real numbers rather than dashes.
+     */
+    if (had_cache) {
+        s_mode = MODE_RUNNING;
+        show(0);
+    }
+
     /* Clock before the first fetch, so that fetch can be bucketed. */
     sync_clock();
+
+    /*
+     * Re-age the restored cache now that the clock is real.
+     *
+     * restore_cache() ran before NTP, so it could not tell how old the values
+     * were. With a clock, the age is applied properly -- and if the cache is
+     * older than the stale threshold the deck switches to the stale screen on
+     * its own, which is the correct outcome rather than a bug.
+     */
+    if (had_cache && s_clock_ok) {
+        cache_t c;
+        if (settings_load_cache(&c, sizeof(c)) && cache_is_valid(&c)) {
+            const int64_t age_s = cache_age_seconds(&c, (int64_t)time(NULL));
+            if (age_s >= 0) {
+                s_freshness.last_success_ms =
+                    (int64_t)millis() - age_s * 1000;
+                Serial.printf("cache: aged %lld seconds\n", (long long)age_s);
+            }
+        }
+    }
 
     stripe_fetch_set_key(s_key);
     s_mode = MODE_RUNNING;

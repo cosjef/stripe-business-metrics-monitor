@@ -40,5 +40,14 @@ bool settings_set_stripe_key(const char *key);
 bool settings_save_history(const void *blob, size_t len);
 bool settings_load_history(void *out, size_t len);
 
+/*
+ * Last-good values (cache_t), so a restart is not twelve seconds of dashes.
+ *
+ * Same NVS key as the ESP-IDF build -- "last_good" -- so a board moved
+ * between the two firmwares reads its own cache rather than starting blank.
+ */
+bool settings_save_cache(const void *blob, size_t len);
+bool settings_load_cache(void *out, size_t len);
+
 /* Wipe everything: the factory reset behind a long press. */
 bool settings_clear_all(void);

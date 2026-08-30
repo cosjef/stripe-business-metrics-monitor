@@ -18,6 +18,7 @@
 #define KEY_WIFI_PASS "wifi_pass"
 #define KEY_STRIPE    "stripe_key"
 #define KEY_HISTORY   "mrr_history"
+#define KEY_CACHE     "last_good"   /* matches the ESP-IDF build */
 
 /*
  * Every read guards with isKey() before getString().
@@ -191,6 +192,33 @@ bool settings_load_history(void *out, size_t len)
      * reinterpreting it.
      */
     const size_t got = s_prefs.getBytes(KEY_HISTORY, out, len);
+    s_prefs.end();
+    return got == len;
+}
+
+bool settings_save_cache(const void *blob, size_t len)
+{
+    if (blob == NULL || len == 0 || !open_rw()) {
+        return false;
+    }
+    const bool ok = s_prefs.putBytes(KEY_CACHE, blob, len) == len;
+    s_prefs.end();
+    return ok;
+}
+
+bool settings_load_cache(void *out, size_t len)
+{
+    if (out == NULL || len == 0 || !open_ro()) {
+        return false;
+    }
+    if (!s_prefs.isKey(KEY_CACHE)) {
+        s_prefs.end();
+        return false;
+    }
+    /* Exact size only. A short read would leave part of the struct
+     * uninitialised, and cache_is_valid cannot catch a field that was never
+     * written -- it would be validating garbage that happens to look sane. */
+    const size_t got = s_prefs.getBytes(KEY_CACHE, out, len);
     s_prefs.end();
     return got == len;
 }
