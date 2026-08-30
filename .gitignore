@@ -8,6 +8,7 @@ firmware-c6/secrets.ini
 # Host test binaries and their debug bundles
 core/test/test_*
 !core/test/test_*.c
+!core/test/test_*.cpp
 core/test/render_docs
 core/test/*.ppm
 *.dSYM/
