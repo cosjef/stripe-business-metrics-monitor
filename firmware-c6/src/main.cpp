@@ -40,6 +40,7 @@
 
 extern "C" {
 #include "cache.h"
+#include "fonts.h"
 #include "format.h"
 #include "freshness.h"
 #include "invoices.h"
@@ -72,6 +73,14 @@ extern "C" {
  * router. 0 disables. Must be 0 in anything shipped.
  */
 #define FORCE_STALE_AFTER_S 0
+
+/*
+ * Draw a corner-marked test pattern for this many seconds at boot, to settle
+ * orientation by measurement rather than by "it looks right". A square panel
+ * that is transposed or mirrored still renders a plausible UI -- that is the
+ * failure this pattern exists to catch. 0 disables.
+ */
+#define ORIENTATION_TEST_S 0
 
 
 #define DEVICE_TZ "EST5EDT,M3.2.0/2,M11.1.0/2"
@@ -1359,6 +1368,44 @@ void setup(void)
         Serial.println("HALT: display init failed");
         return;
     }
+#if ORIENTATION_TEST_S
+    /*
+     * Asymmetric on both axes: a different marker in each corner, so any
+     * rotation or mirror is legible rather than merely plausible.
+     */
+    {
+        lv_obj_t *scr = lv_screen_active();
+        lv_obj_set_style_bg_color(scr, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+
+        struct { const char *txt; lv_align_t al; uint32_t col; } marks[] = {
+            { "TOP LEFT",  LV_ALIGN_TOP_LEFT,     0x5DCAA5 },
+            { "TR",        LV_ALIGN_TOP_RIGHT,    0xEF9F27 },
+            { "BL",        LV_ALIGN_BOTTOM_LEFT,  0xE74D63 },
+            { "BOTTOM RT", LV_ALIGN_BOTTOM_RIGHT, 0xF4F2EC },
+        };
+        for (unsigned i = 0; i < 4; i++) {
+            lv_obj_t *l = lv_label_create(scr);
+            lv_label_set_text(l, marks[i].txt);
+            lv_obj_set_style_text_font(l, font_for_size(SIZE_LABEL), 0);
+            lv_obj_set_style_text_color(l, lv_color_hex(marks[i].col), 0);
+            lv_obj_align(l, marks[i].al, 0, 0);
+        }
+        /* An arrow that must read left-to-right and point right. */
+        lv_obj_t *arrow = lv_label_create(scr);
+        lv_label_set_text(arrow, "READS L-R  >>>");
+        lv_obj_set_style_text_font(arrow, font_for_size(SIZE_SUBTITLE), 0);
+        lv_obj_set_style_text_color(arrow, lv_color_hex(0xF4F2EC), 0);
+        lv_obj_align(arrow, LV_ALIGN_CENTER, 0, 0);
+
+        for (int i = 0; i < ORIENTATION_TEST_S * 20; i++) {
+            lv_tick_inc(50);
+            lv_timer_handler();
+            delay(50);
+        }
+    }
+#endif
+
     /* After the rails: the touch controller is powered from the same ALDOs as
      * the panel, so it cannot answer before power_up(). */
     touch_begin();

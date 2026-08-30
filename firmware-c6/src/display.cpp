@@ -25,6 +25,11 @@
 
 #include "board.h"
 
+/* Quarter turns, 0-3. Set from the test pattern; see the constructor below. */
+#ifndef DISPLAY_ROTATION
+#define DISPLAY_ROTATION 3
+#endif
+
 static Arduino_DataBus *s_bus = nullptr;
 static Arduino_CO5300  *s_gfx = nullptr;
 
@@ -94,7 +99,16 @@ bool display_init(void)
     /* (bus, rst, rotation, w, h, col_off1, row_off1, col_off2, row_off2).
      * No reset GPIO on this board -- ALDO3 is the reset, pulsed in main.cpp.
      * The panel is full-width, so every offset is 0. */
-    s_gfx = new Arduino_CO5300(s_bus, GFX_NOT_DEFINED, 0,
+    /*
+     * Rotation is settled by the corner-marked test pattern, not by eye.
+     *
+     * At 0 the panel renders 90 degrees off the enclosure: a label placed at
+     * the top-left appeared bottom-left with all text running vertically.
+     * A square panel makes that easy to miss -- it still looks like a
+     * rendered UI, which is exactly why this was measured rather than
+     * glanced at.
+     */
+    s_gfx = new Arduino_CO5300(s_bus, GFX_NOT_DEFINED, DISPLAY_ROTATION,
                                LCD_WIDTH, LCD_HEIGHT, 0, 0, 0, 0);
 
     if (!s_gfx->begin()) {
