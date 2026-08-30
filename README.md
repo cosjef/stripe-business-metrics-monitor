@@ -23,12 +23,10 @@ growth and churn land as one number instead of two you have to reconcile.
 **What needs you today.** Failed payments, with what they are worth and when
 Stripe next retries them.
 
-No app, no dashboard, no browser tab you forget to open. Your revenue data
-goes to Stripe and nowhere else.
-
-There is no soldering and no enclosure to print. You buy a Waveshare
-ESP32-C6 board, flash it over USB, and finish setup on your phone over WiFi.
-You do not write any firmware.
+No app, no dashboard, no browser tab you forget to open, and your revenue
+data goes to Stripe and nowhere else. There is no soldering and no enclosure
+to print: you buy a Waveshare ESP32-C6 board, flash it over USB, and finish
+setup on your phone over WiFi. You do not write any firmware.
 
 ## What it shows
 
@@ -49,8 +47,7 @@ The last tile is not a screen but a state. If a fetch fails, the deck says so
 rather than leaving an old figure up looking current.
 
 These images are not mockups. They are rendered from the firmware itself, at
-the panel's real 480x480 with the real fonts, so they cannot drift from what
-the device draws.
+the panel's real 480x480 resolution.
 
 ## What you need
 
@@ -154,7 +151,7 @@ When it succeeds the deck appears, and setup is done. Both the WiFi
 credentials and the key are stored on the board and survive a reflash, so
 this is a one-time step.
 
-## Living with it
+## Using it
 
 **It polls every five minutes.** Fresh enough to feel live, gentle enough on
 the API.
@@ -227,12 +224,12 @@ count, not the ability to move money.
 
 ## For developers
 
-The repository splits in two:
+The code splits along one line, portable against hardware-bound:
 
 ```
 core/           portable: rendering, MRR maths, parsers, fonts, tests
 firmware-c6/    the device: display, radios, provisioning, I2C peripherals
-docs/           the spec, the port plan, and the hardware notes
+docs/           the build plan and the screenshots
 ```
 
 Nothing in `core/` may include `esp_*.h`, `<Arduino.h>`, `driver/*` or
@@ -258,16 +255,6 @@ dependency: `cd firmware-c6 && pio pkg install`.
 Panel bring-up, the radios and the I2C peripherals are not covered. They
 need real hardware, and every claim about them in the docs was checked
 against a register read rather than a datasheet.
-
-### Regenerating the screenshots
-
-The images on this page come from the firmware, not a drawing tool. After any
-layout change:
-
-```sh
-cd core/test && make render_docs && ./render_docs
-../../docs/img/build.sh          # needs ImageMagick
-```
 
 ### Regenerating fonts
 

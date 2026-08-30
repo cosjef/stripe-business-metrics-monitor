@@ -6,6 +6,14 @@
  * than an illustration of it. A hand-drawn mockup would drift from the code
  * the first time a layout changed; this cannot.
  *
+ * After any layout change, refresh the images the README uses:
+ *
+ *     cd core/test && make render_docs && ./render_docs
+ *     ../../docs/img/build.sh          # needs ImageMagick
+ *
+ * build.sh writes 8-bit PNGs on purpose: the 16-bit ones ImageMagick
+ * produces by default will not open in macOS Preview.
+ *
  * Figures are this account's real ones, taken from the device's own logs, so
  * the README shows a device that exists rather than invented numbers.
  *
