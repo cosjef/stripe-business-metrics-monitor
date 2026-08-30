@@ -304,6 +304,16 @@ It should carry both the 30-day churn count and the at-risk figure, because
 "7 left" and "2 more are leaving" are different facts and the second is the
 one that can still be acted on.
 
+### Rejected: the MRR sparkline
+
+`core/src/sparkline.c` exists with 37 passing checks, and `history.c` is
+already accumulating the 30-day series it would draw. It was proposed as a
+replacement for the MRR card's context bar -- same 14px row, same data, but
+showing the path rather than just where today sits on it.
+
+Declined by the owner. Do not re-propose it. The module stays because it is
+tested and costs nothing sitting there, but nothing draws it.
+
 ### Parked: tenure
 
 Median active tenure (80 days here) is a real measure of stickiness and would

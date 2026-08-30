@@ -31,6 +31,7 @@
 
 #include "battery_hw.h"
 #include "board.h"
+#include "buttons.h"
 #include "display.h"
 #include "portal.h"
 #include "settings.h"
@@ -1346,6 +1347,7 @@ void setup(void)
     Serial.println();
     Serial.println("=== Stripe Revenue Display " FIRMWARE_VERSION " ===");
 
+    buttons_begin();
     clear_values();
 
     if (!power_up()) {
@@ -1590,6 +1592,18 @@ void loop(void)
     } else if (s_retry.consecutive_fails > 0) {
         wifi_retry_on_connected(&s_retry);
         Serial.println("wifi: reconnected");
+    }
+
+    /*
+     * A press moves the deck and restarts the dwell, so the screen you asked
+     * for gets a full interval rather than whatever was left of the last one.
+     */
+    const int nudge = buttons_poll();
+    if (nudge != 0 && s_visible_count > 0) {
+        s_slot = (s_slot + nudge + s_visible_count) % s_visible_count;
+        show(s_slot);
+        last_rotate = now;
+        battery_hw_read(&s_battery);
     }
 
     if (now - last_rotate >= ROTATE_MS) {
