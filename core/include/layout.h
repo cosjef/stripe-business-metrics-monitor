@@ -58,6 +58,10 @@
 #define MIX_ROW1_DY         C6_MIX_ROW1_DY
 #define MIX_ROW2_DY         C6_MIX_ROW2_DY
 #define MIX_LABEL_GAP       C6_MIX_LABEL_GAP
+#define BATT_W              C6_BATT_W
+#define BATT_H              C6_BATT_H
+#define BATT_GAP            C6_BATT_GAP
+#define BATT_CENTER_Y       C6_BATT_CENTER_Y
 #define PILL_PAD_X          C6_PILL_PAD_X
 #define PILL_PAD_Y          C6_PILL_PAD_Y
 
@@ -113,6 +117,10 @@
 #define MIX_ROW1_DY         (88)
 #define MIX_ROW2_DY         (124)
 #define MIX_LABEL_GAP       (3)
+#define BATT_W              (17)
+#define BATT_H              (9)
+#define BATT_GAP            (8)
+#define BATT_CENTER_Y       (23)
 #define PILL_PAD_X          (8)
 #define PILL_PAD_Y          (3)
 

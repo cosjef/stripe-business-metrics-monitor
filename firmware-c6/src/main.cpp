@@ -367,6 +367,23 @@ static void draw_stale(void)
                       s_values[SCREEN_MRR].hero, age_line, footer);
 }
 
+/*
+ * Fill in the battery fields every card shares.
+ *
+ * Reported only when the reading is plausible: UNKNOWN means the sensor is
+ * wrong rather than the cell, and a glyph drawn from a bad reading would be a
+ * confident claim about something unmeasured.
+ */
+static void set_battery(card_data_t *c)
+{
+    if (s_battery.level == BATTERY_UNKNOWN) {
+        c->battery_pct = -1;
+        return;
+    }
+    c->battery_pct = s_pmu.getBatteryPercent();
+    c->battery_charging = s_battery.charging;
+}
+
 /* `slot` indexes the visible list, not screen_id_t. */
 static void show(int slot)
 {
@@ -444,6 +461,7 @@ static void show(int slot)
          * reports; this one asks.
          */
         c.accent_red = true;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -466,6 +484,7 @@ static void show(int slot)
         } else {
             c.comparison = s_arpu_caption;
         }
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -482,6 +501,7 @@ static void show(int slot)
         c.delta = s_net_pill;
         c.delta_is_gain = s_net_is_gain;
         c.fill_pct = s_net_fill_pct;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -504,6 +524,7 @@ static void show(int slot)
         } else {
             c.comparison = s_new_caption;
         }
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -520,6 +541,7 @@ static void show(int slot)
         c.comparison = s_arr_caption;
         c.delta_is_gain = s_arr_is_gain;
         c.fill_pct = s_arr_fill_pct;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -538,6 +560,7 @@ static void show(int slot)
         c.has_delta = s_risk_actionable;
         c.delta = s_risk_pill;
         c.fill_pct = s_risk_fill_pct;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -556,6 +579,7 @@ static void show(int slot)
         c.flow_lost = s_flow_l;
         c.flow_gained_label = s_flow_gained;
         c.flow_lost_label = s_flow_lost;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);
@@ -572,6 +596,7 @@ static void show(int slot)
         c.comparison = s_comparison;
         c.delta_is_gain = s_delta_is_gain;
         c.fill_pct = s_fill_pct;
+        set_battery(&c);
         c.dot_index = slot;
         c.dot_count = s_visible_count;
         screen_draw_card(lv_screen_active(), &c);

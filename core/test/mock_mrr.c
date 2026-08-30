@@ -892,6 +892,166 @@ static void render_arpu_gated(void)
     harness_dump_ppm("mock_arpu_gated.ppm");
 }
 
+/*
+ * Battery glyph in the label row.
+ *
+ * Drawn from primitives rather than an icon asset: a rounded outline, a fill
+ * proportional to charge, and a nub on the right. At this size an image would
+ * cost flash and a build step to say what four rectangles say.
+ *
+ * It sits left of the delta pill, in the ~200px of label row that is empty on
+ * every screen -- the longest label, "ANNUAL RUN RATE", still ends 200px short
+ * of the pill.
+ */
+static void draw_battery_glyph(lv_obj_t *scr, int pct, bool charging,
+                               int right_edge, int cy)
+{
+    const int w = 34, h = 17, nub_w = 3, nub_h = 7;
+    const int x = right_edge - w - nub_w;
+    const int y = cy - h / 2;
+
+    /* Below 20% the glyph itself turns amber: the shape is small enough that
+     * a short fill alone is easy to miss at arm's length. */
+    const uint32_t colour = charging ? COLOR_GREEN
+                          : pct <= 20 ? COLOR_AMBER : COLOR_MUTED;
+
+    lv_obj_t *body = lv_obj_create(scr);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_pos(body, x, y);
+    lv_obj_set_size(body, w, h);
+    lv_obj_set_style_radius(body, 4, 0);
+    lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_color(body, lv_color_hex(colour), 0);
+    lv_obj_set_style_border_width(body, 2, 0);
+    lv_obj_set_style_border_opa(body, LV_OPA_COVER, 0);
+
+    lv_obj_t *nub = lv_obj_create(scr);
+    lv_obj_remove_style_all(nub);
+    lv_obj_set_pos(nub, x + w, cy - nub_h / 2);
+    lv_obj_set_size(nub, nub_w, nub_h);
+    lv_obj_set_style_radius(nub, 1, 0);
+    lv_obj_set_style_bg_color(nub, lv_color_hex(colour), 0);
+    lv_obj_set_style_bg_opa(nub, LV_OPA_COVER, 0);
+
+    /* The fill is the charge. Never wider than the body's inner width, and
+     * never zero-width when there is any charge at all -- a battery that
+     * reads empty at 3% would be a lie in the alarming direction. */
+    const int inner_w = w - 6;
+    int fill = (inner_w * pct) / 100;
+    if (fill < 2 && pct > 0) {
+        fill = 2;
+    }
+    if (fill > inner_w) {
+        fill = inner_w;
+    }
+
+    lv_obj_t *lvl = lv_obj_create(scr);
+    lv_obj_remove_style_all(lvl);
+    lv_obj_set_pos(lvl, x + 3, y + 3);
+    lv_obj_set_size(lvl, fill, h - 6);
+    lv_obj_set_style_radius(lvl, 2, 0);
+    lv_obj_set_style_bg_color(lvl, lv_color_hex(colour), 0);
+    lv_obj_set_style_bg_opa(lvl, LV_OPA_COVER, 0);
+
+    /*
+     * The plus goes on last, in the background colour, so it reads as cut out
+     * of the fill. Drawn before it, the fill would paint straight over it.
+     */
+    if (charging) {
+        const int arm = 9, thick = 3;
+        lv_obj_t *hbar = lv_obj_create(scr);
+        lv_obj_remove_style_all(hbar);
+        lv_obj_set_pos(hbar, x + w / 2 - arm / 2, cy - thick / 2);
+        lv_obj_set_size(hbar, arm, thick);
+        lv_obj_set_style_bg_color(hbar, lv_color_hex(COLOR_CARD), 0);
+        lv_obj_set_style_bg_opa(hbar, LV_OPA_COVER, 0);
+
+        lv_obj_t *vbar = lv_obj_create(scr);
+        lv_obj_remove_style_all(vbar);
+        lv_obj_set_pos(vbar, x + w / 2 - thick / 2, cy - arm / 2);
+        lv_obj_set_size(vbar, thick, arm);
+        lv_obj_set_style_bg_color(vbar, lv_color_hex(COLOR_CARD), 0);
+        lv_obj_set_style_bg_opa(vbar, LV_OPA_COVER, 0);
+    }
+}
+
+/* One card, with the glyph at a given charge, to judge it in context. */
+static void render_with_battery(int pct, bool charging, const char *out)
+{
+    lv_obj_t *scr = harness_screen();
+    prepare(scr);
+
+    const int card_w = PANEL_PX - 2 * PAD_PX;
+    const int inner_x = PAD_PX + CARD_PAD;
+    const int col = card_w - 2 * CARD_PAD;
+
+    lv_obj_t *card = lv_obj_create(scr);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_pos(card, PAD_PX, CARD_Y);
+    lv_obj_set_size(card, card_w, CARD_H);
+    lv_obj_set_style_bg_color(card, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(card, CARD_RADIUS, 0);
+
+    label_at(scr, "MRR", font_for_size(SIZE_LABEL), COLOR_MUTED,
+             PAD_PX, LABEL_BASELINE_Y);
+
+    lv_obj_t *pill = lv_label_create(scr);
+    lv_label_set_text(pill, "+4.2%");
+    lv_obj_set_style_text_font(pill, font_for_size(SIZE_FOOTER), 0);
+    lv_obj_set_style_text_color(pill, lv_color_hex(COLOR_BG), 0);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(COLOR_GREEN), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_left(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_right(pill, PILL_PAD_X, 0);
+    lv_obj_set_style_pad_top(pill, PILL_PAD_Y, 0);
+    lv_obj_set_style_pad_bottom(pill, PILL_PAD_Y, 0);
+    lv_obj_align(pill, LV_ALIGN_TOP_RIGHT, -PAD_PX, LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    /* 14px clear of the pill's left edge. */
+    draw_battery_glyph(scr, pct, charging, PANEL_PX - PAD_PX - 118,
+                       LABEL_BASELINE_Y + 14);
+
+    label_at(scr, "33 active", font_for_size(SIZE_SUBTITLE), COLOR_MUTED,
+             inner_x, CARD_Y + CARD_SUBTITLE_DY);
+
+    const int px = hero_size_for_width("$1,106.33", col);
+    label_at_baseline(scr, "$1,106.33", font_for_size(px), COLOR_PRIMARY,
+                      inner_x, CARD_Y + CARD_HERO_BASELINE_DY);
+
+    label_at(scr, "vs $1,061 last month", font_for_size(SIZE_FOOTER),
+             COLOR_DIM, inner_x, CARD_Y + CARD_CAPTION_DY);
+
+    dots(scr, 0, 7);
+    harness_render();
+    harness_dump_ppm(out);
+}
+
+/* The real renderer, at the pill widths that exposed the collision. */
+static void render_batt_real(const char *pill, const char *out)
+{
+    lv_obj_t *scr = harness_screen();
+
+    card_data_t d = {0};
+    d.label = "NET 30D";
+    d.hero = "+$179.00";
+    d.subtitle = "net this month";
+    d.comparison = "$354 new / $175 lost";
+    d.has_delta = true;
+    d.delta = pill;
+    d.delta_is_gain = true;
+    d.fill_pct = 67;
+    d.battery_pct = 85;
+    d.battery_charging = true;
+    d.dot_index = 6;
+    d.dot_count = 7;
+
+    screen_draw_card(scr, &d);
+    harness_render();
+    harness_dump_ppm(out);
+}
+
 int main(void)
 {
     harness_init();
@@ -910,6 +1070,11 @@ int main(void)
     render_arpu_c();
     render_arpu_paired();
     render_arpu_gated();
+    render_batt_real("growth",  "mock_bat_wide1.ppm");
+    render_batt_real("+$10.40", "mock_bat_wide2.ppm");
+    render_with_battery(85, true,  "mock_bat_charging.ppm");
+    render_with_battery(62, false, "mock_bat_ok.ppm");
+    render_with_battery(15, false, "mock_bat_low.ppm");
     printf("wrote mock_current/option_b/collecting .ppm at %dx%d\n",
            HARNESS_W, HARNESS_H);
     return 0;

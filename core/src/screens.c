@@ -283,6 +283,14 @@ static struct {
     lv_obj_t *caption;
     lv_obj_t *caption2;   /* right-hand caption, flow variant only */
     lv_obj_t *mix_bar2;   /* second bar row, mix variant only */
+    /* Battery glyph: outline, nub, fill, and the two bars of the charging
+     * plus. Built from primitives rather than an icon asset -- at 34x17 an
+     * image would cost flash and a build step to say what these say. */
+    lv_obj_t *batt_body;
+    lv_obj_t *batt_nub;
+    lv_obj_t *batt_fill;
+    lv_obj_t *batt_plus_h;
+    lv_obj_t *batt_plus_v;
     lv_obj_t *dots[SCREENS_MAX_DOTS];
     int hero_px;
     int hero_pos_px;
@@ -391,6 +399,60 @@ static void build_card_objects(lv_obj_t *scr)
     lv_obj_set_style_text_color(s_card.caption2, lv_color_hex(COLOR_DIM), 0);
     lv_obj_add_flag(s_card.caption2, LV_OBJ_FLAG_HIDDEN);
 
+    /* Battery glyph. Created hidden; screen_draw_card shows it when there is
+     * a plausible reading to show. */
+    /* Placeholder coordinates only: draw_battery_glyph repositions every
+     * object from the pill's real left edge on each draw. */
+    const int bx = 0;
+    const int by = BATT_CENTER_Y - BATT_H / 2;
+
+    s_card.batt_body = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.batt_body);
+    lv_obj_set_pos(s_card.batt_body, bx, by);
+    lv_obj_set_size(s_card.batt_body, BATT_W, BATT_H);
+    lv_obj_set_style_radius(s_card.batt_body, 4, 0);
+    lv_obj_set_style_bg_opa(s_card.batt_body, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_card.batt_body, 2, 0);
+    lv_obj_set_style_border_opa(s_card.batt_body, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_card.batt_body, LV_OBJ_FLAG_HIDDEN);
+
+    s_card.batt_nub = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.batt_nub);
+    lv_obj_set_pos(s_card.batt_nub, bx + BATT_W, BATT_CENTER_Y - 3);
+    lv_obj_set_size(s_card.batt_nub, 3, 7);
+    lv_obj_set_style_radius(s_card.batt_nub, 1, 0);
+    lv_obj_set_style_bg_opa(s_card.batt_nub, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_card.batt_nub, LV_OBJ_FLAG_HIDDEN);
+
+    s_card.batt_fill = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.batt_fill);
+    lv_obj_set_pos(s_card.batt_fill, bx + 3, by + 3);
+    lv_obj_set_size(s_card.batt_fill, 0, BATT_H - 6);
+    lv_obj_set_style_radius(s_card.batt_fill, 2, 0);
+    lv_obj_set_style_bg_opa(s_card.batt_fill, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_card.batt_fill, LV_OBJ_FLAG_HIDDEN);
+
+    /*
+     * The charging plus, created after the fill so it paints on top. Drawn
+     * before it, the fill would cover it -- which would look like the mark
+     * simply not working.
+     */
+    s_card.batt_plus_h = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.batt_plus_h);
+    lv_obj_set_pos(s_card.batt_plus_h, bx + BATT_W / 2 - 4, BATT_CENTER_Y - 1);
+    lv_obj_set_size(s_card.batt_plus_h, 9, 3);
+    lv_obj_set_style_bg_color(s_card.batt_plus_h, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_card.batt_plus_h, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_card.batt_plus_h, LV_OBJ_FLAG_HIDDEN);
+
+    s_card.batt_plus_v = lv_obj_create(scr);
+    lv_obj_remove_style_all(s_card.batt_plus_v);
+    lv_obj_set_pos(s_card.batt_plus_v, bx + BATT_W / 2 - 1, BATT_CENTER_Y - 4);
+    lv_obj_set_size(s_card.batt_plus_v, 3, 9);
+    lv_obj_set_style_bg_color(s_card.batt_plus_v, lv_color_hex(COLOR_CARD), 0);
+    lv_obj_set_style_bg_opa(s_card.batt_plus_v, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_card.batt_plus_v, LV_OBJ_FLAG_HIDDEN);
+
     for (int i = 0; i < SCREENS_MAX_DOTS; i++) {
         lv_obj_t *dot = lv_obj_create(scr);
         lv_obj_remove_style_all(dot);
@@ -400,6 +462,99 @@ static void build_card_objects(lv_obj_t *scr)
         lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_flag(dot, LV_OBJ_FLAG_HIDDEN);
         s_card.dots[i] = dot;
+    }
+}
+
+/*
+ * Update the battery glyph, or hide it.
+ *
+ * A negative percentage means no plausible reading, and the glyph disappears
+ * rather than guessing. Colour alone does not carry the charging state: the
+ * plus mark does, because green against muted grey is the pair red-green
+ * colour blindness makes hardest.
+ */
+static void draw_battery_glyph(int pct, _Bool charging)
+{
+    /*
+     * Positioned from the pill's ACTUAL left edge, not a fixed inset.
+     *
+     * The pill's width follows its text -- "--" is 58px and "$354.00" is 123
+     * -- so any constant offset that clears one will collide with the other.
+     * The first version used a fixed inset chosen against "+4.2%" and
+     * overlapped the pill on every screen with a longer one, which is most of
+     * them.
+     *
+     * lv_obj_update_layout() forces the pill's geometry to be current;
+     * without it the coordinates read as whatever they were last frame, and
+     * the glyph lags a frame behind the text it is avoiding.
+     */
+    /*
+     * Derive the pill's left edge from its WIDTH, not its x.
+     *
+     * The pill is right-aligned by lv_obj_align, and alignment is resolved
+     * during layout -- so on the first draw after a rebuild its x still reads
+     * 0 and the glyph lands off the left edge of the panel, appearing not to
+     * be drawn at all. Its width is known as soon as the text is set, and the
+     * right edge is a constant, so computing the left edge from those is
+     * correct on every draw including the first.
+     */
+    lv_obj_update_layout(s_card.pill);
+    const int pill_w = lv_obj_get_width(s_card.pill);
+    const int pill_left = PANEL_PX - PAD_PX - pill_w;
+
+    const int bx = pill_left - BATT_GAP - 3 - BATT_W;   /* 3 = nub */
+    const int by = BATT_CENTER_Y - BATT_H / 2;
+
+    lv_obj_set_pos(s_card.batt_body, bx, by);
+    lv_obj_set_pos(s_card.batt_nub, bx + BATT_W, BATT_CENTER_Y - 3);
+    lv_obj_set_pos(s_card.batt_fill, bx + 3, by + 3);
+    lv_obj_set_pos(s_card.batt_plus_h, bx + BATT_W / 2 - 4, BATT_CENTER_Y - 1);
+    lv_obj_set_pos(s_card.batt_plus_v, bx + BATT_W / 2 - 1, BATT_CENTER_Y - 4);
+
+    if (pct < 0) {
+        lv_obj_add_flag(s_card.batt_body, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.batt_nub, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.batt_fill, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.batt_plus_h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.batt_plus_v, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    if (pct > 100) {
+        pct = 100;
+    }
+
+    /* Below 20% the whole glyph turns amber: at this size a short fill alone
+     * is easy to miss at arm's length, but a colour change is not. */
+    const uint32_t colour = charging ? COLOR_GREEN
+                          : pct <= 20 ? COLOR_AMBER : COLOR_MUTED;
+
+    lv_obj_set_style_border_color(s_card.batt_body, lv_color_hex(colour), 0);
+    lv_obj_clear_flag(s_card.batt_body, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_set_style_bg_color(s_card.batt_nub, lv_color_hex(colour), 0);
+    lv_obj_clear_flag(s_card.batt_nub, LV_OBJ_FLAG_HIDDEN);
+
+    /* Never zero-width while there is charge left: a battery reading empty at
+     * 3% would be a lie in the alarming direction. */
+    const int inner_w = BATT_W - 6;
+    int fill = (inner_w * pct) / 100;
+    if (fill < 2 && pct > 0) {
+        fill = 2;
+    }
+    if (fill > inner_w) {
+        fill = inner_w;
+    }
+    lv_obj_set_size(s_card.batt_fill, fill, BATT_H - 6);
+    lv_obj_set_style_bg_color(s_card.batt_fill, lv_color_hex(colour), 0);
+    lv_obj_clear_flag(s_card.batt_fill, LV_OBJ_FLAG_HIDDEN);
+
+    if (charging) {
+        lv_obj_clear_flag(s_card.batt_plus_h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(s_card.batt_plus_v, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(s_card.batt_plus_h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_card.batt_plus_v, LV_OBJ_FLAG_HIDDEN);
     }
 }
 
@@ -634,6 +789,17 @@ void screen_draw_card(lv_obj_t *scr, const card_data_t *data)
     /* Right-align the pill after its text changed, or the width is stale. */
     lv_obj_align(s_card.pill, LV_ALIGN_TOP_RIGHT, -PAD_PX,
                  LABEL_BASELINE_Y - PILL_PAD_Y);
+
+    /*
+     * The glyph goes after the pill is aligned, not before.
+     *
+     * It is positioned relative to the pill's left edge, and the pill has no
+     * geometry until its text is set and it has been aligned -- both of which
+     * happen below where this used to sit. Measured too early, width and x
+     * both read 0, the glyph landed off the left edge of the panel, and it
+     * looked like it was never drawn at all.
+     */
+    draw_battery_glyph(data->battery_pct, data->battery_charging);
 
     if (!data->has_flow && !data->has_mix) {
         lv_label_set_text(s_card.caption,

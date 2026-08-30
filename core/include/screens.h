@@ -86,6 +86,20 @@ typedef struct {
     _Bool accent_red;
 
     /*
+     * Battery, shown in the label row on every card.
+     *
+     * Only place on the deck with room: even the longest label, "ANNUAL RUN
+     * RATE", ends 200px short of the delta pill. The pills themselves are not
+     * available -- the two that look free today fill permanently once the
+     * seven-day trend arrives.
+     *
+     * pct < 0 hides it, which is what an unknown or implausible reading
+     * should produce: no claim rather than a wrong one.
+     */
+    int battery_pct;
+    _Bool battery_charging;
+
+    /*
      * Mix variant: two labelled bar rows comparing two rates.
      *
      * Unlike the flow bar, which splits one total, these are two independent

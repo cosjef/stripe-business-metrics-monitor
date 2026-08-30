@@ -123,6 +123,21 @@
 #define C6_MIX_ROW2_DY          (248)  /* 72px pitch: 56px group + 16 clear */
 #define C6_MIX_LABEL_GAP        (6)    /* bar bottom to its label */
 
+/*
+ * Battery glyph in the label row.
+ *
+ * Right edge sits this far left of the panel edge -- clear of the delta pill
+ * rather than crowding it. Drawn from primitives, so the only constants
+ * needed are its box and where it sits.
+ */
+#define C6_BATT_W               (34)
+#define C6_BATT_H               (17)
+/* Clear space between the glyph's nub and the pill's left edge. The glyph is
+ * placed from the pill's real position, so this is a true gap rather than a
+ * guess about how wide the pill will be. */
+#define C6_BATT_GAP             (16)
+#define C6_BATT_CENTER_Y        (46)
+
 /* Delta pill, right-aligned on the label row. */
 #define C6_PILL_PAD_X           (16)
 #define C6_PILL_PAD_Y           (6)
