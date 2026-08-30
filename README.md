@@ -24,7 +24,7 @@ and when Stripe will retry them.
 
 No app. No dashboard. No browser tab you forget to open. Your revenue data
 goes to Stripe and nowhere else. There's nothing to solder and no firmware
-to write: buy a Waveshare ESP32-C6 board, flash it over USB, then finish
+to write. Buy a Waveshare ESP32-C6 board, flash it over USB, then finish
 setup from your phone over Wi-Fi.
 
 ## What it shows
