@@ -4,7 +4,7 @@ A small desktop device that shows your business health at a glance. It lives
 in your peripheral vision, so the numbers find you instead of the other way
 around.
 
-![MRR](docs/img/mrr.png)
+![The device on a desk, showing the ARPU screen](docs/img/device.jpg)
 
 It cycles through eight screens, five seconds each, with the following
 information:
@@ -106,8 +106,8 @@ You will need it in step 5, and Stripe only shows it once.
 Plug the board into your computer, then:
 
 ```sh
-git clone https://github.com/cosjef/stripe-desk-display.git
-cd stripe-desk-display/firmware-c6
+git clone https://github.com/cosjef/stripe-business-metrics-monitor.git
+cd stripe-business-metrics-monitor/firmware-c6
 pio run -t upload
 ```
 
