@@ -4,7 +4,9 @@ A small desktop device that shows your business health at a glance. It lives
 in your peripheral vision, so the numbers find you instead of the other way
 around.
 
-![The device on a desk, showing the FAILED screen](docs/img/device.jpg)
+| | | |
+|:--:|:--:|:--:|
+| ![FAILED](docs/img/device-failed.jpg) | ![NET 30D](docs/img/device-net30d.jpg) | ![CANCELLED](docs/img/device-cancelled.jpg) |
 
 It cycles through eight screens, five seconds each, with the following
 information:
