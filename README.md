@@ -4,7 +4,7 @@ A small desktop device that shows your business health at a glance. It lives
 in your peripheral vision, so the numbers find you instead of the other way
 around.
 
-![The device on a desk, showing the ARPU screen](docs/img/device.jpg)
+![The device on a desk, showing the FAILED screen](docs/img/device.jpg)
 
 It cycles through eight screens, five seconds each, with the following
 information:
